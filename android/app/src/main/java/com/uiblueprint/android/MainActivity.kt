@@ -15,8 +15,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.uiblueprint.android.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -152,7 +154,9 @@ class MainActivity : AppCompatActivity() {
     private suspend fun pollWorkerStatus(sessionId: String) {
         repeat(POLL_MAX_ITERATIONS) {
             delay(POLL_INTERVAL_MS)
-            val state = UploadWorker.getState(applicationContext, sessionId)
+            val state = withContext(Dispatchers.IO) {
+                UploadWorker.getState(applicationContext, sessionId)
+            }
             val idx = sessions.indexOfFirst { it.id == sessionId }
             if (idx >= 0) {
                 sessions[idx] = sessions[idx].copy(status = state)
