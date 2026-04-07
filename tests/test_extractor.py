@@ -19,6 +19,7 @@ import pytest
 
 from ui_blueprint.extractor import (
     SCHEMA_VERSION,
+    _generate_synthetic_frame,
     extract,
     save_blueprint,
 )
@@ -26,6 +27,7 @@ from ui_blueprint.extractor import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def schema() -> dict:
@@ -45,6 +47,7 @@ def synthetic_blueprint() -> dict:
 # ---------------------------------------------------------------------------
 # Schema validation
 # ---------------------------------------------------------------------------
+
 
 class TestSchemaValidation:
     def test_synthetic_blueprint_validates(self, synthetic_blueprint: dict, schema: dict) -> None:
@@ -121,6 +124,7 @@ class TestSchemaValidation:
 # Custom chunk parameters
 # ---------------------------------------------------------------------------
 
+
 class TestCustomParameters:
     def test_custom_chunk_ms(self) -> None:
         bp = extract(None, synthetic=True, chunk_ms=2000)
@@ -135,10 +139,31 @@ class TestCustomParameters:
         total_samples = sum(len(c["tracks"]) for c in bp["chunks"])
         assert total_samples > 0
 
+    def test_synthetic_pipeline_infers_events(self) -> None:
+        bp = extract(None, synthetic=True, sample_fps=10)
+        event_kinds = {event["kind"] for chunk in bp["chunks"] for event in chunk["events"]}
+        assert "scroll" in event_kinds
+
+    def test_synthetic_pipeline_uses_fitted_tracks(self) -> None:
+        bp = extract(None, synthetic=True, sample_fps=10)
+        track_models = {track["model"] for chunk in bp["chunks"] for track in chunk["tracks"]}
+        assert "linear" in track_models or "bezier" in track_models
+        for chunk in bp["chunks"]:
+            for track in chunk["tracks"]:
+                assert "residual_error" in track
+
+    def test_assets_dir_exports_real_crops(self, tmp_path: Path) -> None:
+        assets_dir = tmp_path / "assets"
+        bp = extract(None, synthetic=True, assets_dir=assets_dir)
+        assert bp["assets"]
+        for asset in bp["assets"]:
+            assert Path(asset["path"]).exists()
+
 
 # ---------------------------------------------------------------------------
 # File save / load round-trip
 # ---------------------------------------------------------------------------
+
 
 class TestSaveBlueprintRoundTrip:
     def test_save_and_reload(self, tmp_path: Path, synthetic_blueprint: dict, schema: dict) -> None:
@@ -153,6 +178,7 @@ class TestSaveBlueprintRoundTrip:
 # ---------------------------------------------------------------------------
 # CLI integration test (--synthetic flag)
 # ---------------------------------------------------------------------------
+
 
 class TestCLI:
     def test_cli_synthetic_extract_produces_valid_blueprint(
@@ -235,3 +261,33 @@ class TestCLI:
             timeout=60,
         )
         assert result.returncode != 0
+
+
+class TestVideoDecoderPath:
+    def test_extract_from_real_video_when_imageio_available(
+        self, tmp_path: Path, schema: dict
+    ) -> None:
+        imageio = pytest.importorskip("imageio.v2")
+        numpy = pytest.importorskip("numpy")
+
+        video_path = tmp_path / "sample.mp4"
+        frames = []
+        meta = {
+            "width_px": 368,
+            "height_px": 640,
+            "fps": 12.0,
+            "duration_ms": 1000.0,
+        }
+        for idx in range(12):
+            frame = _generate_synthetic_frame(meta, idx * (1000.0 / 12.0)).resize((368, 640))
+            frames.append(numpy.asarray(frame))
+
+        with imageio.get_writer(video_path, fps=12, format="FFMPEG") as writer:
+            for frame in frames:
+                writer.append_data(frame)
+
+        bp = extract(video_path, sample_fps=6)
+        assert bp["meta"]["width_px"] == 368
+        assert bp["meta"]["height_px"] == 640
+        assert bp["elements_catalog"]
+        jsonschema.validate(instance=bp, schema=schema)

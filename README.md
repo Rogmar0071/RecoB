@@ -52,7 +52,8 @@ ui-blueprint/
 ### Install
 
 ```bash
-pip install ".[dev]"   # installs Pillow, jsonschema, ruff, pytest
+pip install ".[dev]"    # test/lint deps, includes imageio[ffmpeg] for video decoding
+pip install ".[video]"  # runtime optional video decoder path
 ```
 
 ### Extract a Blueprint from a video
@@ -78,6 +79,16 @@ python -m ui_blueprint preview blueprint.json --out preview_frames/
 
 Outputs one PNG per chunk — draws bounding boxes and element labels onto a blank canvas — so you can quickly validate the timeline structure.
 
+### Current extractor behavior
+
+The extractor now runs a real baseline pipeline:
+
+1. **Frame decode** — samples frames with `imageio[ffmpeg]` when installed; otherwise falls back to MP4 metadata parsing.
+2. **Baseline detection** — uses deterministic heuristics over background difference, edge masks, and dark-text proposals to find UI regions.
+3. **Tracking** — matches detections frame-to-frame with IoU + simple appearance similarity.
+4. **Motion fitting** — fits `step`, `linear`, `bezier`, or `sampled` tracks and stores `residual_error`.
+5. **Event inference** — currently emits heuristic `scroll` and tap-like events.
+
 ### Test without a real video (CI / unit tests)
 
 ```bash
@@ -98,25 +109,25 @@ CI runs automatically on every push and pull request via GitHub Actions (`.githu
 
 ## Constraints and next steps
 
-### Current state (MVP scaffold)
+### Current state (baseline video extractor)
 
-The MVP produces **syntactically valid, schema-conformant blueprints** from synthetic data and real MP4 metadata (duration parsed from the `mvhd` atom).  The following pipeline stages are **placeholder stubs** ready for real models:
+The extractor now produces **schema-conformant blueprints** from synthetic frames and real MP4 frame samples. The current implementation is intentionally lightweight and deterministic:
 
 | Hook | File | Description |
 |---|---|---|
-| `_detect_elements()` | `extractor.py` | Replace with a real UI-element detector (e.g., DETR fine-tuned on Android UI) |
-| `_ocr_region()` | `extractor.py` | Replace with an OCR engine (e.g., PaddleOCR, Tesseract) |
-| `_track_elements()` | `extractor.py` | Replace with tracking-by-detection + appearance embeddings |
-| `_fit_track_curve()` | `extractor.py` | Replace with actual bezier / spring fitting (currently stores raw keyframes) |
-| `_infer_events()` | `extractor.py` | Replace with motion/highlight analysis for tap/swipe/scroll inference |
+| `_detect_elements()` | `extractor.py` | Background/edge/text-region heuristics; ready to replace with a learned detector |
+| `_ocr_region()` | `extractor.py` | Still a stub; add Tesseract/EasyOCR behind a feature flag next |
+| `_track_elements()` | `extractor.py` | IoU + mean-color / edge-density appearance matching |
+| `_fit_track_curve()` | `extractor.py` | Fits `step`, `linear`, `bezier`, else falls back to `sampled` |
+| `_infer_events()` | `extractor.py` | Heuristic scroll and tap-like inference from tracked motion/appearance |
 
 ### Adding real detectors
 
-1. Decode frames from the MP4 (e.g., with `av` / `imageio` / OpenCV).
-2. Pass raw RGB bytes to `_detect_elements()`.
-3. Track across frames with `_track_elements()`.
-4. Fit curves with `_fit_track_curve()`.
-5. Infer events with `_infer_events()`.
+1. Add real OCR content to detections.
+2. Improve detection quality with learned UI region proposals.
+3. Add list-row stabilization and re-identification for scrolling content.
+4. Add spring fitting for Android-native motion.
+5. Expand event inference beyond scroll/tap to drag/swipe/type.
 
 ### Adding full video decode (no OpenCV required)
 
@@ -124,7 +135,7 @@ The MVP produces **syntactically valid, schema-conformant blueprints** from synt
 pip install imageio[ffmpeg]
 ```
 
-Use `imageio.get_reader(path)` to iterate frames, then pass raw bytes to the detection hooks.
+The optional `video` extra already installs `imageio[ffmpeg]`, and the extractor will use it automatically when present.
 
 ### Automation script compilation
 
