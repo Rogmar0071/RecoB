@@ -2,9 +2,7 @@ package com.uiblueprint.android
 
 import android.content.Context
 import android.util.Log
-import androidx.work.Constraints
 import androidx.work.Data
-import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -110,11 +108,6 @@ class UploadWorker(context: Context, params: WorkerParameters) : Worker(context,
         fun enqueue(context: Context, clipPath: String, metaJson: String): String {
             val tag = "upload_${UUID.randomUUID()}"
             val request = OneTimeWorkRequestBuilder<UploadWorker>()
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build(),
-                )
                 .setInputData(
                     Data.Builder()
                         .putString(KEY_CLIP_PATH, clipPath)
