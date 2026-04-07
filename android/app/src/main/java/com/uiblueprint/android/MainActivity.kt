@@ -2,16 +2,12 @@ package com.uiblueprint.android
 
 import android.app.Activity
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.ServiceConnection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
-import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +17,6 @@ import androidx.lifecycle.lifecycleScope
 import com.uiblueprint.android.databinding.ActivityMainBinding
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -155,8 +150,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun pollWorkerStatus(sessionId: String) {
-        repeat(30) {
-            delay(2_000)
+        repeat(POLL_MAX_ITERATIONS) {
+            delay(POLL_INTERVAL_MS)
             val state = UploadWorker.getState(applicationContext, sessionId)
             val idx = sessions.indexOfFirst { it.id == sessionId }
             if (idx >= 0) {
@@ -188,6 +183,7 @@ class MainActivity : AppCompatActivity() {
     data class SessionItem(val id: String, val status: String, val label: String)
 
     companion object {
-        private const val TAG = "MainActivity"
+        private const val POLL_INTERVAL_MS = 2_000L
+        private const val POLL_MAX_ITERATIONS = 30 // ~60 s total
     }
 }

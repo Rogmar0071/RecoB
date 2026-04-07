@@ -97,11 +97,14 @@ def _session_dir(session_id: str) -> Path:
     """
     Return the resolved, safe absolute path for a session directory.
 
-    Raises HTTP 400 if the resolved path escapes the sessions root
+    Uses Path().name to strip any directory separators from session_id, then
+    verifies the resolved path is contained within the sessions root
     (defence-in-depth on top of UUID regex validation).
     """
     root = _sessions_root()
-    candidate = (root / session_id).resolve()
+    # Path().name strips any directory separators — only the final component is used.
+    safe_id = Path(session_id).name
+    candidate = (root / safe_id).resolve()
     # Ensure the resolved path is directly inside root (not a parent or sibling).
     try:
         candidate.relative_to(root)
@@ -194,7 +197,7 @@ def _run_extraction(session_id: str) -> None:
 async def create_session(
     video: UploadFile,
     meta: str = Form(default=""),
-    background_tasks: BackgroundTasks = None,  # injected by FastAPI  # noqa: B006
+    background_tasks: BackgroundTasks = None,  # noqa: RUF009 — injected by FastAPI
 ) -> JSONResponse:
     """
     Accept a multipart upload (video MP4 + optional meta JSON string).
@@ -283,8 +286,9 @@ def get_preview_file(session_id: str, filename: str) -> FileResponse:
     _validate_session_id(session_id)
     _validate_filename(filename)
     preview_dir = _session_dir(session_id) / "preview"
-    # Resolve and confirm the file is inside the preview directory.
-    png_path = (preview_dir / filename).resolve()
+    # Path().name strips directory separators from the filename before joining.
+    safe_filename = Path(filename).name
+    png_path = (preview_dir / safe_filename).resolve()
     try:
         png_path.relative_to(preview_dir.resolve())
     except ValueError:
