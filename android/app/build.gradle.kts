@@ -68,6 +68,9 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.okhttp)
     implementation(libs.lifecycle.viewmodel.ktx)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+    implementation(libs.recyclerview)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

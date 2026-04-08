@@ -28,6 +28,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".VideoPlayerActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
         <!-- Foreground service that runs MediaProjection + MediaRecorder -->
         <service
             android:name=".CaptureService"

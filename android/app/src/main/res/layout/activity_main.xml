@@ -47,19 +47,12 @@
         android:textSize="14sp"
         android:layout_marginBottom="8dp" />
 
-    <ScrollView
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvSessions"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <TextView
-            android:id="@+id/tvSessions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="12sp"
-            android:visibility="gone"
-            tools:text="• clip_20240101_120000.mp4  [uploading]" />
-    </ScrollView>
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingVertical="4dp" />
 
 </LinearLayout>

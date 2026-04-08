@@ -212,7 +212,7 @@ class CaptureService : Service() {
     private fun buildNotification(): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Recording screen…")
-            .setContentText("Recording a 10-second clip")
+            .setContentText("Recording a 20-second clip")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .build()
@@ -230,7 +230,7 @@ class CaptureService : Service() {
 
         private const val CHANNEL_ID = "capture_channel"
         private const val NOTIF_ID = 1001
-        private const val CLIP_DURATION_MS = 10_000
+        private const val CLIP_DURATION_MS = 20_000
         private const val VIDEO_BITRATE = 4_000_000
         private const val VIDEO_FPS = 30
         private const val ERROR_CAPTURE_REQUEST_LOST = "Screen capture could not be started."

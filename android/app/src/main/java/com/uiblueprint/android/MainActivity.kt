@@ -11,11 +11,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
-import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.uiblueprint.android.databinding.ActivityMainBinding
 import java.io.File
 import java.util.UUID
@@ -23,12 +23,12 @@ import java.util.UUID
 /**
  * Main screen.
  *
- * Shows a "Record 10 s" button.  When tapped:
+ * Shows a "Record 20 s" button.  When tapped:
  * 1. Requests MediaProjection permission.
  * 2. Starts CaptureService (foreground, mediaProjection type).
- * 3. CaptureService records 10 s and broadcasts CAPTURE_DONE.
+ * 3. CaptureService records 20 s and broadcasts CAPTURE_DONE.
  * 4. MainActivity inserts the clip into the device Gallery via MediaStore.
- * 5. A simple session list (in-memory) shows [saved] or [failed] status.
+ * 5. A RecyclerView session list shows [saved] or [failed] status; tapping a saved item plays it.
  *
  * Backend upload is disabled by default; see [MediaStoreVideoSaver] for local storage.
  */
@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private val watchdogHandler = Handler(Looper.getMainLooper())
     private val recordingCompletionHelper = RecordingCompletionHelper(RECORDING_TIMEOUT_MS)
     private val sessions = mutableListOf<SessionItem>()
+    private lateinit var sessionAdapter: SessionAdapter
     private val recordingWatchdogRunnable = Runnable {
         val startedAtMs = captureResultStore.getRecordingStartedAtMs() ?: return@Runnable
         if (recordingCompletionHelper.hasTimedOut(startedAtMs, SystemClock.elapsedRealtime())) {
@@ -89,8 +90,11 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        sessionAdapter = SessionAdapter(sessions) { item -> openVideoPlayer(item) }
+        binding.rvSessions.layoutManager = LinearLayoutManager(this)
+        binding.rvSessions.adapter = sessionAdapter
+
         binding.btnRecord.setOnClickListener { onRecordClicked() }
-        renderSessionList()
         showIdleUi()
     }
 
@@ -154,12 +158,12 @@ class MainActivity : AppCompatActivity() {
         when (val result = MediaStoreVideoSaver.saveClipToGallery(applicationContext, clip)) {
             is MediaStoreVideoSaver.SaveResult.Success -> {
                 sessions.add(0, SessionItem(sessionId, STATUS_SAVED, result.displayName, result.uriString))
-                renderSessionList()
+                sessionAdapter.notifyItemInserted(0)
                 Toast.makeText(this, "Saved to Gallery", Toast.LENGTH_SHORT).show()
             }
             is MediaStoreVideoSaver.SaveResult.Failure -> {
                 sessions.add(0, SessionItem(sessionId, STATUS_FAILED, clip.name))
-                renderSessionList()
+                sessionAdapter.notifyItemInserted(0)
                 showCaptureError(result.userMessage)
             }
         }
@@ -256,22 +260,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     // -------------------------------------------------------------------------
-    // Session list rendering
+    // Session list interaction
     // -------------------------------------------------------------------------
 
-    private fun renderSessionList() {
-        if (sessions.isEmpty()) {
-            binding.tvSessions.visibility = View.GONE
+    private fun openVideoPlayer(item: SessionItem) {
+        val uriString = item.uri
+        if (uriString.isNullOrBlank()) {
+            Toast.makeText(this, getString(R.string.error_video_open), Toast.LENGTH_SHORT).show()
             return
         }
-        binding.tvSessions.visibility = View.VISIBLE
-        binding.tvSessions.text = sessions.joinToString("\n") { "• ${it.label}  [${it.status}]" }
+        val intent = Intent(this, VideoPlayerActivity::class.java).apply {
+            putExtra(VideoPlayerActivity.EXTRA_URI_STRING, uriString)
+        }
+        startActivity(intent)
     }
 
     data class SessionItem(val id: String, val status: String, val label: String, val uri: String? = null)
 
     companion object {
-        private const val RECORDING_TIMEOUT_MS = 15_000L
+        private const val RECORDING_TIMEOUT_MS = 30_000L
         private const val ERROR_PREFIX = "Capture failed"
         private const val ERROR_PERMISSION_DENIED = "Screen capture permission denied"
         private const val ERROR_START_FAILED = "Capture failed to start recording."
