@@ -191,7 +191,7 @@ a real-world artifact. Key fields:
 |---|---|
 | `id` | UUID for this artifact |
 | `domain_profile_id` | UUID of the confirmed DomainProfile used |
-| `schema_version` | Contract version (`v1.1.0`) |
+| `schema_version` | Object schema version (`v1.1.0`) under steering contract v1.1.1 |
 | `source` | Media provenance (media_id, optional time range) |
 | `entities[]` | Detected parts/features with type, attributes, confidence |
 | `relations[]` | Directed edges between entities (e.g. `stacked_on`) |

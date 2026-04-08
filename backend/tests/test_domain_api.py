@@ -3,7 +3,7 @@ backend.tests.test_domain_api
 ==============================
 API integration tests for the Domain Profile + Blueprint Compiler endpoints.
 
-Steering contract v1.1.0 required test cases:
+Steering contract v1.1.1 required test cases:
 - derive -> confirm -> compile happy path
 - PATCH rejected with 409 after confirm
 - PATCH/GET unknown domain id returns 404

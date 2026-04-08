@@ -2,7 +2,7 @@
 ui_blueprint.domain.ir
 ======================
 Data models for AI-derived Domain Profiles and the Blueprint Intermediate
-Representation (IR).  Field shapes follow the steering contract v1.1.0.
+Representation (IR).  Field shapes follow the steering contract v1.1.1.
 
 All classes use plain Python dataclasses with to_dict / from_dict helpers
 so no new runtime dependencies are required.
