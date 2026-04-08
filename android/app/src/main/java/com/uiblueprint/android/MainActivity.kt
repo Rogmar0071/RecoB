@@ -105,9 +105,6 @@ class MainActivity : AppCompatActivity() {
             IntentFilter(CaptureService.ACTION_CAPTURE_DONE),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        if (drainPendingCaptureResult()) {
-            return
-        }
         recoverPendingCaptureState()
     }
 
@@ -149,8 +146,7 @@ class MainActivity : AppCompatActivity() {
             startForegroundService(intent)
         } catch (_: Exception) {
             watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
-            captureResultStore.clearRecordingStarted()
-            captureResultStore.clearLastResult()
+            clearRecoveryState()
             showIdleUi()
             showCaptureError(ERROR_START_FAILED)
         }
@@ -198,48 +194,46 @@ class MainActivity : AppCompatActivity() {
 
     private fun processCaptureDone(event: CaptureDoneEvent) {
         watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
-        captureResultStore.clearRecordingStarted()
-        captureResultStore.clearLastResult()
         showIdleUi()
+        try {
+            val normalizedEvent = recordingCompletionHelper.normalize(event)
+            val error = normalizedEvent.error
+            if (error != null) {
+                showCaptureError(error)
+                return
+            }
 
-        val normalizedEvent = recordingCompletionHelper.normalize(event)
-        val error = normalizedEvent.error
-        if (error != null) {
-            showCaptureError(error)
-            return
+            val clipPath = normalizedEvent.clipPath
+            if (clipPath == null) {
+                showCaptureError(CaptureDoneEvent.ERROR_NO_OUTPUT)
+                return
+            }
+            onCaptureDone(File(clipPath))
+        } finally {
+            clearRecoveryState()
         }
-
-        val clipPath = normalizedEvent.clipPath
-        if (clipPath == null) {
-            showCaptureError(CaptureDoneEvent.ERROR_NO_OUTPUT)
-            return
-        }
-        onCaptureDone(File(clipPath))
     }
 
     private fun handleRecordingTimeout() {
         watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
-        captureResultStore.clearRecordingStarted()
-        captureResultStore.clearLastResult()
+        clearRecoveryState()
         showIdleUi()
         showCaptureError(CaptureDoneEvent.ERROR_TIMEOUT)
     }
 
     private fun handlePermissionDenied() {
         watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
-        captureResultStore.clearRecordingStarted()
-        captureResultStore.clearLastResult()
+        clearRecoveryState()
         showIdleUi()
         Toast.makeText(this, ERROR_PERMISSION_DENIED, Toast.LENGTH_SHORT).show()
     }
 
-    private fun drainPendingCaptureResult(): Boolean {
-        val persistedResult = captureResultStore.getLastResult() ?: return false
-        processCaptureDone(persistedResult)
-        return true
-    }
-
     private fun recoverPendingCaptureState() {
+        captureResultStore.getLastResult()?.let {
+            processCaptureDone(it)
+            return
+        }
+
         val startedAtMs = captureResultStore.getRecordingStartedAtMs() ?: run {
             showIdleUi()
             return
@@ -252,6 +246,11 @@ class MainActivity : AppCompatActivity() {
 
         showRecordingUi()
         scheduleRecordingWatchdog(recordingCompletionHelper.remainingTimeoutMs(startedAtMs, nowMs))
+    }
+
+    private fun clearRecoveryState() {
+        captureResultStore.clearLastResult()
+        captureResultStore.clearRecordingStarted()
     }
 
     private fun scheduleRecordingWatchdog(delayMs: Long) {
