@@ -39,12 +39,12 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var captureResultStore: CaptureResultStore
-    private val recordingUiStateMachine = RecordingUiStateMachine()
     private val watchdogHandler = Handler(Looper.getMainLooper())
+    private val recordingCompletionHelper = RecordingCompletionHelper(RECORDING_TIMEOUT_MS)
     private val sessions = mutableListOf<SessionItem>()
     private val recordingWatchdogRunnable = Runnable {
         val startedAtMs = captureResultStore.getRecordingStartedAtMs() ?: return@Runnable
-        if (SystemClock.elapsedRealtime() - startedAtMs >= RECORDING_TIMEOUT_MS) {
+        if (recordingCompletionHelper.hasTimedOut(startedAtMs, SystemClock.elapsedRealtime())) {
             handleRecordingTimeout()
         }
     }
@@ -56,8 +56,7 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             startCapture(result.resultCode, result.data!!)
         } else {
-            val transition = recordingUiStateMachine.onPermissionDenied(ERROR_PERMISSION_DENIED)
-            renderState(transition.state)
+            showIdleUi()
             Toast.makeText(this, ERROR_PERMISSION_DENIED, Toast.LENGTH_SHORT).show()
         }
     }
@@ -96,7 +95,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnRecord.setOnClickListener { onRecordClicked() }
         renderSessionList()
-        renderState(recordingUiStateMachine.onIdle().state)
+        showIdleUi()
     }
 
     override fun onResume() {
@@ -121,7 +120,7 @@ class MainActivity : AppCompatActivity() {
     // -------------------------------------------------------------------------
 
     private fun onRecordClicked() {
-        renderState(recordingUiStateMachine.onRecordRequested().state)
+        showRequestingPermissionUi()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -138,7 +137,7 @@ class MainActivity : AppCompatActivity() {
     private fun startCapture(resultCode: Int, data: Intent) {
         captureResultStore.clearLastResult()
         captureResultStore.markRecordingStarted(SystemClock.elapsedRealtime())
-        renderState(recordingUiStateMachine.onRecordingStarted().state)
+        showRecordingUi()
         scheduleRecordingWatchdog(RECORDING_TIMEOUT_MS)
         val intent = Intent(this, CaptureService::class.java).apply {
             putExtra(CaptureService.EXTRA_RESULT_CODE, resultCode)
@@ -150,10 +149,7 @@ class MainActivity : AppCompatActivity() {
             watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
             captureResultStore.clearRecordingStarted()
             captureResultStore.clearLastResult()
-            val transition = recordingUiStateMachine.onCaptureCompleted(
-                CaptureDoneEvent(error = ERROR_START_FAILED),
-            )
-            renderState(transition.state)
+            showIdleUi()
             Toast.makeText(this, "Capture failed: $ERROR_START_FAILED", Toast.LENGTH_LONG).show()
         }
     }
@@ -202,25 +198,29 @@ class MainActivity : AppCompatActivity() {
         watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
         captureResultStore.clearRecordingStarted()
         captureResultStore.clearLastResult()
+        showIdleUi()
 
-        when (val effect = recordingUiStateMachine.onCaptureCompleted(event).effect) {
-            is RecordingUiEffect.EnqueueUpload -> onCaptureDone(File(effect.clipPath))
-            is RecordingUiEffect.ShowError -> {
-                Toast.makeText(this, "Capture failed: ${effect.message}", Toast.LENGTH_LONG).show()
-            }
-            RecordingUiEffect.None -> Unit
+        val normalizedEvent = recordingCompletionHelper.normalize(event)
+        val error = normalizedEvent.error
+        if (error != null) {
+            Toast.makeText(this, "Capture failed: $error", Toast.LENGTH_LONG).show()
+            return
         }
-        renderState(recordingUiStateMachine.state)
+
+        val clipPath = normalizedEvent.clipPath
+        if (clipPath == null) {
+            Toast.makeText(this, "Capture failed: ${CaptureDoneEvent.ERROR_NO_OUTPUT}", Toast.LENGTH_LONG).show()
+            return
+        }
+        onCaptureDone(File(clipPath))
     }
 
     private fun handleRecordingTimeout() {
         watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
         captureResultStore.clearRecordingStarted()
         captureResultStore.clearLastResult()
-        val transition = recordingUiStateMachine.onWatchdogTimeout()
-        renderState(transition.state)
-        val effect = transition.effect as? RecordingUiEffect.ShowError ?: return
-        Toast.makeText(this, "Capture failed: ${effect.message}", Toast.LENGTH_LONG).show()
+        showIdleUi()
+        Toast.makeText(this, "Capture failed: ${CaptureDoneEvent.ERROR_TIMEOUT}", Toast.LENGTH_LONG).show()
     }
 
     private fun recoverPendingCaptureState() {
@@ -230,17 +230,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         val startedAtMs = captureResultStore.getRecordingStartedAtMs() ?: run {
-            renderState(recordingUiStateMachine.onIdle().state)
+            showIdleUi()
             return
         }
-        val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
-        if (elapsedMs >= RECORDING_TIMEOUT_MS) {
+        val nowMs = SystemClock.elapsedRealtime()
+        if (recordingCompletionHelper.hasTimedOut(startedAtMs, nowMs)) {
             handleRecordingTimeout()
             return
         }
 
-        renderState(recordingUiStateMachine.onRecordingStarted().state)
-        scheduleRecordingWatchdog(RECORDING_TIMEOUT_MS - elapsedMs)
+        showRecordingUi()
+        scheduleRecordingWatchdog(recordingCompletionHelper.remainingTimeoutMs(startedAtMs, nowMs))
     }
 
     private fun scheduleRecordingWatchdog(delayMs: Long) {
@@ -248,13 +248,19 @@ class MainActivity : AppCompatActivity() {
         watchdogHandler.postDelayed(recordingWatchdogRunnable, delayMs.coerceAtLeast(0L))
     }
 
-    private fun renderState(state: UiRecordingState) {
-        binding.btnRecord.isEnabled = state.state == RecordingUiStatus.IDLE
-        binding.tvStatus.text = when (state.state) {
-            RecordingUiStatus.IDLE -> getString(R.string.status_idle)
-            RecordingUiStatus.REQUESTING_PERMISSION -> getString(R.string.status_requesting_permission)
-            RecordingUiStatus.RECORDING -> getString(R.string.status_recording)
-        }
+    private fun showIdleUi() {
+        binding.btnRecord.isEnabled = true
+        binding.tvStatus.text = getString(R.string.status_idle)
+    }
+
+    private fun showRequestingPermissionUi() {
+        binding.btnRecord.isEnabled = false
+        binding.tvStatus.text = getString(R.string.status_requesting_permission)
+    }
+
+    private fun showRecordingUi() {
+        binding.btnRecord.isEnabled = false
+        binding.tvStatus.text = getString(R.string.status_recording)
     }
 
     // -------------------------------------------------------------------------
