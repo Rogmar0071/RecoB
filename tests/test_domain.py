@@ -3,11 +3,14 @@ tests.test_domain
 =================
 Unit tests for the AI-derived Domain Profile and Blueprint Compiler.
 
-Covers the four required test cases from steering contract v1.1:
-1. compile rejects missing domain_profile_id / None domain
-2. compile rejects unconfirmed domain profile
-3. Serialisation round-trip for DomainProfile and BlueprintIR
-4. StubDomainDerivationProvider returns ranked draft profiles
+Covers steering contract v1.1.0 required test cases:
+1. compileBlueprintFromMedia rejects None domain
+2. compileBlueprintFromMedia rejects non-confirmed domain (draft/archived)
+3. BlueprintIR relations/constraints reference only existing entity ids
+4. DomainProfileStore roundtrip preserves field shapes
+5. Serialisation round-trip for DomainProfile and BlueprintIR
+6. StubDomainDerivationProvider returns ranked draft profiles
+7. schema_version present on all serialised sub-objects
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 import pytest
 
 from ui_blueprint.domain import (
+    SCHEMA_VERSION,
     BlueprintCompileError,
     DomainProfile,
     InMemoryDomainProfileStore,
@@ -79,7 +83,7 @@ class TestCompileRejectsMissingDomain:
 
 
 # ---------------------------------------------------------------------------
-# 2. Compile rejects unconfirmed (draft) domain
+# 2. Compile rejects unconfirmed (draft/archived) domain
 # ---------------------------------------------------------------------------
 
 
@@ -147,6 +151,15 @@ class TestBlueprintIRStructure:
             assert rel.source_entity_id in entity_ids
             assert rel.target_entity_id in entity_ids
 
+    def test_blueprint_constraints_reference_valid_entity_ids(
+        self, sample_media: dict, confirmed_profile: DomainProfile
+    ) -> None:
+        bp = compileBlueprintFromMedia(sample_media, confirmed_profile)
+        entity_ids = {e.id for e in bp.entities}
+        for con in bp.constraints:
+            for eid in con.entities:
+                assert eid in entity_ids
+
     def test_blueprint_provenance_present(
         self, sample_media: dict, confirmed_profile: DomainProfile
     ) -> None:
@@ -168,18 +181,56 @@ class TestBlueprintIRStructure:
 
 
 # ---------------------------------------------------------------------------
-# 4. StubDomainDerivationProvider
+# 4. schema_version present on all serialised sub-objects
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaVersionInSubObjects:
+    def test_domain_profile_schema_version(self, draft_profile: DomainProfile) -> None:
+        d = draft_profile.to_dict()
+        assert d["schema_version"] == SCHEMA_VERSION
+        assert d["derived_from"]["schema_version"] == SCHEMA_VERSION
+        for step in d["capture_protocol"]:
+            assert step["schema_version"] == SCHEMA_VERSION
+        for val in d["validators"]:
+            assert val["schema_version"] == SCHEMA_VERSION
+        for exp in d["exporters"]:
+            assert exp["schema_version"] == SCHEMA_VERSION
+
+    def test_blueprint_ir_schema_version(
+        self, sample_media: dict, confirmed_profile: DomainProfile
+    ) -> None:
+        bp = compileBlueprintFromMedia(sample_media, confirmed_profile)
+        d = bp.to_dict()
+        assert d["schema_version"] == SCHEMA_VERSION
+        assert d["source"]["schema_version"] == SCHEMA_VERSION
+        assert d["completeness"]["schema_version"] == SCHEMA_VERSION
+        for ent in d["entities"]:
+            assert ent["schema_version"] == SCHEMA_VERSION
+        for rel in d["relations"]:
+            assert rel["schema_version"] == SCHEMA_VERSION
+        for con in d["constraints"]:
+            assert con["schema_version"] == SCHEMA_VERSION
+        for prov in d["provenance"]:
+            assert prov["schema_version"] == SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# 5. StubDomainDerivationProvider
 # ---------------------------------------------------------------------------
 
 
 class TestStubProvider:
-    def test_returns_list_of_domain_profiles(self,
-        stub_provider: StubDomainDerivationProvider) -> None:
+    def test_returns_list_of_domain_profiles(
+        self, stub_provider: StubDomainDerivationProvider
+    ) -> None:
         results = stub_provider.derive({"media_id": "x"})
         assert isinstance(results, list)
         assert len(results) >= 1
 
-    def test_all_candidates_are_draft(self, stub_provider: StubDomainDerivationProvider) -> None:
+    def test_all_candidates_are_draft(
+        self, stub_provider: StubDomainDerivationProvider
+    ) -> None:
         for profile in stub_provider.derive({"media_id": "x"}):
             assert profile.status == DOMAIN_STATUS_DRAFT
 
@@ -231,7 +282,7 @@ class TestStubProvider:
 
 
 # ---------------------------------------------------------------------------
-# 5. DomainProfile model
+# 6. DomainProfile model
 # ---------------------------------------------------------------------------
 
 
@@ -240,15 +291,31 @@ class TestDomainProfileModel:
         p = DomainProfile(name="Test")
         assert p.status == DOMAIN_STATUS_DRAFT
 
+    def test_schema_version_default(self) -> None:
+        p = DomainProfile(name="Test")
+        assert p.schema_version == SCHEMA_VERSION
+
     def test_roundtrip(self) -> None:
         p = DomainProfile(
             name="Test Domain",
             status=DOMAIN_STATUS_DRAFT,
-            derived_from=DerivedFrom(media_id="m1", provider="stub", provider_version="1.0"),
-            capture_protocol=[CaptureStep(step_id="s1", title="Step 1", instructions="Do it",
-                required=True)],
-            validators=[ProfileValidator(id="v1", type="min_entity_count", params={"min": 1})],
-            exporters=[ProfileExporter(id="e1", type="generic_blueprint_json", params={})],
+            derived_from=DerivedFrom(
+                media_id="m1", provider="stub", provider_version="1.0"
+            ),
+            capture_protocol=[
+                CaptureStep(
+                    step_id="s1",
+                    title="Step 1",
+                    instructions="Do it",
+                    required=True,
+                )
+            ],
+            validators=[
+                ProfileValidator(id="v1", type="min_entity_count", params={"min": 1})
+            ],
+            exporters=[
+                ProfileExporter(id="e1", type="generic_blueprint_json", params={})
+            ],
             notes="test notes",
         )
         d = p.to_dict()
@@ -256,6 +323,7 @@ class TestDomainProfileModel:
         assert p2.id == p.id
         assert p2.name == p.name
         assert p2.status == p.status
+        assert p2.schema_version == SCHEMA_VERSION
         assert p2.derived_from.media_id == "m1"
         assert p2.capture_protocol[0].step_id == "s1"
         assert p2.validators[0].type == "min_entity_count"
@@ -264,7 +332,7 @@ class TestDomainProfileModel:
 
 
 # ---------------------------------------------------------------------------
-# 6. InMemoryDomainProfileStore
+# 7. InMemoryDomainProfileStore
 # ---------------------------------------------------------------------------
 
 

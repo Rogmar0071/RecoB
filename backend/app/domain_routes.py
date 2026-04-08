@@ -2,15 +2,19 @@
 backend.app.domain_routes
 =========================
 FastAPI router implementing the AI-derived Domain Profile and Blueprint
-Compiler API (steering contract v1.1).
+Compiler API (steering contract v1.1.0).
 
 Endpoints
 ---------
-POST   /api/domains/derive                  -- derive draft domain profile candidates
-GET    /api/domains/{domain_profile_id}     -- fetch a domain profile
-PATCH  /api/domains/{domain_profile_id}     -- edit a draft profile (rejected if confirmed)
-POST   /api/domains/{domain_profile_id}/confirm -- confirm a draft profile
-POST   /api/blueprints/compile              -- compile blueprint (requires confirmed domain)
+POST   /api/domains/derive                       derive draft domain profile candidates
+GET    /api/domains/{domain_profile_id}          fetch a domain profile
+PATCH  /api/domains/{domain_profile_id}          edit a draft profile (409 if not draft)
+POST   /api/domains/{domain_profile_id}/confirm  confirm a draft profile (409 if not draft)
+POST   /api/blueprints/compile                   compile blueprint (requires confirmed domain)
+
+Error shape (all error responses)::
+
+    {"error": {"code": "string", "message": "string", "details": {}}}
 """
 
 from __future__ import annotations
@@ -18,25 +22,26 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ui_blueprint.domain.compiler import BlueprintCompileError, compileBlueprintFromMedia
 from ui_blueprint.domain.derivation import StubDomainDerivationProvider
 from ui_blueprint.domain.ir import (
+    DOMAIN_STATUS_CONFIRMED,
+    DOMAIN_STATUS_DRAFT,
+    SCHEMA_VERSION,
     CaptureStep,
     DomainProfile,
     ProfileExporter,
     ProfileValidator,
 )
-from ui_blueprint.domain.ir import DOMAIN_STATUS_CONFIRMED, DOMAIN_STATUS_DRAFT
 from ui_blueprint.domain.store import DomainProfileStore, InMemoryDomainProfileStore
 
 router = APIRouter(prefix="/api")
 
 # ---------------------------------------------------------------------------
-# Module-level store (replaced per-app in tests via dependency override or
-# direct attribute assignment on this module)
+# Module-level store (replaced per-app in tests via set_store)
 # ---------------------------------------------------------------------------
 
 _store: DomainProfileStore = InMemoryDomainProfileStore()
@@ -64,11 +69,39 @@ def _now_rfc3339() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _require_profile(domain_profile_id: str) -> DomainProfile:
+def _ok(content: dict[str, Any], status_code: int = 200) -> JSONResponse:
+    """Return a successful JSON response with top-level schema_version."""
+    return JSONResponse(
+        status_code=status_code,
+        content={"schema_version": SCHEMA_VERSION, **content},
+    )
+
+
+def _error(
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> JSONResponse:
+    """Return a structured error JSON response."""
+    body: dict[str, Any] = {"error": {"code": code, "message": message}}
+    if details:
+        body["error"]["details"] = details
+    return JSONResponse(status_code=status_code, content=body)
+
+
+def _get_profile_or_error(
+    domain_profile_id: str,
+) -> tuple[DomainProfile | None, JSONResponse | None]:
+    """Return (profile, None) on success or (None, error_response) on miss."""
     profile = get_store().get(domain_profile_id)
     if profile is None:
-        raise HTTPException(status_code=404, detail=f"Domain profile '{domain_profile_id}' not found")
-    return profile
+        return None, _error(
+            404,
+            "not_found",
+            f"Domain profile {domain_profile_id!r} not found.",
+        )
+    return profile, None
 
 
 # ---------------------------------------------------------------------------
@@ -84,39 +117,47 @@ async def derive_domain_profiles(body: dict[str, Any]) -> JSONResponse:
     Request body::
 
         {
+          "schema_version": "v1.1.0",   // optional
           "media": {
-            "media_id": "vid_001",
-            "media_type": "video",
-            "uri": "...",        // optional
-            "metadata": {}       // optional
+            "media_id": "vid_001",       // required
+            "media_type": "video",       // required
+            "uri": "...",                // optional
+            "metadata": {}              // optional
           },
           "options": {
-            "max_candidates": 3, // optional, default 3
-            "hint": "cabinet drawer assembly"  // optional free-text hint
+            "max_candidates": 3,         // optional, default 3
+            "hint": "cabinet assembly"  // optional free-text hint
           }
         }
 
-    The returned candidates are persisted as draft profiles.
-    No profile is auto-confirmed.
+    Creates and persists draft profiles; no profile is auto-confirmed.
     """
     media: dict[str, Any] = body.get("media", {})
     options: dict[str, Any] = body.get("options", {})
 
-    media_id: str = media.get("media_id", "unknown")
+    # Validate required media fields.
+    missing = [f for f in ("media_id", "media_type") if not media.get(f)]
+    if missing:
+        return _error(
+            400,
+            "invalid_request",
+            f"media.{missing[0]} is required.",
+            {"missing_fields": missing},
+        )
+
+    media_id: str = media["media_id"]
     hint: str = options.get("hint", "")
     max_candidates: int = int(options.get("max_candidates", 3))
 
-    # Build the media_input dict that the derivation provider expects.
     media_input: dict[str, Any] = {
         "media_id": media_id,
-        "media_type": media.get("media_type", "other"),
+        "media_type": media["media_type"],
         "hint": hint,
         "metadata": media.get("metadata", {}),
     }
 
     candidates = _provider.derive(media_input, max_candidates=max_candidates)
 
-    # Persist each candidate as a draft.
     store = get_store()
     for profile in candidates:
         store.save(profile)
@@ -125,11 +166,11 @@ async def derive_domain_profiles(body: dict[str, Any]) -> JSONResponse:
     if not hint:
         warnings.append(
             "No hint provided; results may be less accurate. "
-            "Pass 'options.hint' with a brief description of the media content."
+            "Pass options.hint with a brief description of the media content."
         )
 
-    return JSONResponse(
-        content={
+    return _ok(
+        {
             "candidates": [
                 {
                     "domain_profile_id": p.id,
@@ -153,8 +194,10 @@ async def derive_domain_profiles(body: dict[str, Any]) -> JSONResponse:
 @router.get("/domains/{domain_profile_id}", status_code=200)
 def get_domain_profile(domain_profile_id: str) -> JSONResponse:
     """Return the full DomainProfile for the given id."""
-    profile = _require_profile(domain_profile_id)
-    return JSONResponse(content={"domain_profile": profile.to_dict()})
+    profile, err = _get_profile_or_error(domain_profile_id)
+    if err:
+        return err
+    return _ok({"domain_profile": profile.to_dict()})  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -163,52 +206,63 @@ def get_domain_profile(domain_profile_id: str) -> JSONResponse:
 
 
 @router.patch("/domains/{domain_profile_id}", status_code=200)
-async def patch_domain_profile(domain_profile_id: str, body: dict[str, Any]) -> JSONResponse:
+async def patch_domain_profile(
+    domain_profile_id: str, body: dict[str, Any]
+) -> JSONResponse:
     """
-    Edit a draft DomainProfile.
-
-    Rejected with 409 if the profile is not in ``draft`` status.
+    Edit a draft DomainProfile.  Rejected with 409 if not in draft status.
 
     Request body::
 
         {
+          "schema_version": "v1.1.0",   // optional
           "patch": {
-            "name": "...",             // optional
-            "capture_protocol": [...], // optional
-            "validators": [...],       // optional
-            "exporters": [...],        // optional
-            "notes": "..."             // optional
+            "name": "...",              // optional
+            "capture_protocol": [...],  // optional
+            "validators": [...],        // optional
+            "exporters": [...],         // optional
+            "notes": "..."              // optional
           }
         }
     """
-    profile = _require_profile(domain_profile_id)
+    profile, err = _get_profile_or_error(domain_profile_id)
+    if err:
+        return err
 
-    if profile.status != DOMAIN_STATUS_DRAFT:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Domain profile '{domain_profile_id}' has status '{profile.status}' "
-                "and cannot be edited.  Create a new draft to make changes."
+    if profile.status != DOMAIN_STATUS_DRAFT:  # type: ignore[union-attr]
+        return _error(
+            409,
+            "state_conflict",
+            (
+                f"Domain profile {domain_profile_id!r} has status"
+                f" {profile.status!r} and cannot be edited."  # type: ignore[union-attr]
+                " Create a new draft to make changes."
             ),
         )
 
     patch: dict[str, Any] = body.get("patch", {})
 
     if "name" in patch:
-        profile.name = str(patch["name"])
+        profile.name = str(patch["name"])  # type: ignore[union-attr]
     if "notes" in patch:
-        profile.notes = str(patch["notes"])
+        profile.notes = str(patch["notes"])  # type: ignore[union-attr]
     if "capture_protocol" in patch:
-        profile.capture_protocol = [CaptureStep.from_dict(s) for s in patch["capture_protocol"]]
+        profile.capture_protocol = [  # type: ignore[union-attr]
+            CaptureStep.from_dict(s) for s in patch["capture_protocol"]
+        ]
     if "validators" in patch:
-        profile.validators = [ProfileValidator.from_dict(v) for v in patch["validators"]]
+        profile.validators = [  # type: ignore[union-attr]
+            ProfileValidator.from_dict(v) for v in patch["validators"]
+        ]
     if "exporters" in patch:
-        profile.exporters = [ProfileExporter.from_dict(e) for e in patch["exporters"]]
+        profile.exporters = [  # type: ignore[union-attr]
+            ProfileExporter.from_dict(e) for e in patch["exporters"]
+        ]
 
-    profile.updated_at = _now_rfc3339()
-    get_store().save(profile)
+    profile.updated_at = _now_rfc3339()  # type: ignore[union-attr]
+    get_store().save(profile)  # type: ignore[arg-type]
 
-    return JSONResponse(content={"domain_profile": profile.to_dict()})
+    return _ok({"domain_profile": profile.to_dict()})  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -217,59 +271,59 @@ async def patch_domain_profile(domain_profile_id: str, body: dict[str, Any]) -> 
 
 
 @router.post("/domains/{domain_profile_id}/confirm", status_code=200)
-async def confirm_domain_profile(domain_profile_id: str, body: dict[str, Any]) -> JSONResponse:
+async def confirm_domain_profile(
+    domain_profile_id: str, body: dict[str, Any]
+) -> JSONResponse:
     """
     Confirm a draft DomainProfile, making it immutable and ready for compile.
 
-    Once confirmed, PATCH requests will be rejected (409).
+    Returns 409 if the profile is not in draft status (non-idempotent by
+    contract — callers must derive a new draft to re-confirm).
 
     Request body::
 
         {
-          "confirmed_by": "alice",  // optional
-          "note": "LGTM"            // optional
+          "schema_version": "v1.1.0",   // optional
+          "confirmed_by": "alice",       // optional
+          "note": "LGTM"                // optional
         }
     """
-    profile = _require_profile(domain_profile_id)
+    profile, err = _get_profile_or_error(domain_profile_id)
+    if err:
+        return err
 
-    if profile.status == DOMAIN_STATUS_CONFIRMED:
-        # Idempotent — already confirmed, return current state.
-        return JSONResponse(
-            content={
-                "domain_profile": {
-                    "id": profile.id,
-                    "status": profile.status,
-                    "schema_version": profile.schema_version,
-                    "updated_at": profile.updated_at,
-                }
-            }
-        )
-
-    if profile.status != DOMAIN_STATUS_DRAFT:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Profile '{domain_profile_id}' has status '{profile.status}' and cannot be confirmed.",
+    if profile.status != DOMAIN_STATUS_DRAFT:  # type: ignore[union-attr]
+        return _error(
+            409,
+            "state_conflict",
+            (
+                f"Domain profile {domain_profile_id!r} has status"
+                f" {profile.status!r} and cannot be confirmed."  # type: ignore[union-attr]
+                " Only draft profiles may be confirmed."
+            ),
         )
 
     confirmed_by: str = body.get("confirmed_by", "")
     note: str = body.get("note", "")
 
-    profile.status = DOMAIN_STATUS_CONFIRMED
-    profile.updated_at = _now_rfc3339()
+    profile.status = DOMAIN_STATUS_CONFIRMED  # type: ignore[union-attr]
+    profile.updated_at = _now_rfc3339()  # type: ignore[union-attr]
     if confirmed_by or note:
-        existing = profile.notes or ""
+        existing = profile.notes or ""  # type: ignore[union-attr]
         addendum = f"Confirmed by: {confirmed_by}. {note}".strip()
-        profile.notes = f"{existing}\n{addendum}".strip() if existing else addendum
+        profile.notes = (  # type: ignore[union-attr]
+            f"{existing}\n{addendum}".strip() if existing else addendum
+        )
 
-    get_store().save(profile)
+    get_store().save(profile)  # type: ignore[arg-type]
 
-    return JSONResponse(
-        content={
+    return _ok(
+        {
             "domain_profile": {
-                "id": profile.id,
-                "status": profile.status,
-                "schema_version": profile.schema_version,
-                "updated_at": profile.updated_at,
+                "id": profile.id,  # type: ignore[union-attr]
+                "status": profile.status,  # type: ignore[union-attr]
+                "schema_version": profile.schema_version,  # type: ignore[union-attr]
+                "updated_at": profile.updated_at,  # type: ignore[union-attr]
             }
         }
     )
@@ -288,32 +342,39 @@ async def compile_blueprint(body: dict[str, Any]) -> JSONResponse:
     Request body::
 
         {
+          "schema_version": "v1.1.0",   // optional
           "media": {
             "media_id": "vid_001",
             "media_type": "video",
-            "uri": "...",       // optional
-            "metadata": {}      // optional
+            "uri": "...",               // optional
+            "metadata": {}              // optional
           },
-          "domain_profile_id": "<uuid>"
+          "domain_profile_id": "<uuid>"  // required
         }
 
-    Returns ``400`` if *domain_profile_id* is absent or the profile is not
-    confirmed.  Returns ``404`` if the profile is not found.
+    Returns 400 if domain_profile_id is absent or profile is not confirmed.
+    Returns 404 if the profile is not found.
     """
     domain_profile_id: str | None = body.get("domain_profile_id")
     if not domain_profile_id:
-        raise HTTPException(
-            status_code=400,
-            detail="'domain_profile_id' is required.  Derive a domain profile, confirm it, then compile.",
+        return _error(
+            400,
+            "invalid_request",
+            "domain_profile_id is required."
+            " Derive a domain profile, confirm it, then compile.",
         )
 
-    profile = _require_profile(domain_profile_id)
+    profile, err = _get_profile_or_error(domain_profile_id)
+    if err:
+        return err
 
     media: dict[str, Any] = body.get("media", {})
 
     try:
-        blueprint = compileBlueprintFromMedia(media=media, confirmed_domain_profile=profile)
+        blueprint = compileBlueprintFromMedia(
+            media=media, confirmed_domain_profile=profile
+        )
     except BlueprintCompileError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _error(400, "domain_not_confirmed", str(exc))
 
-    return JSONResponse(content={"blueprint": blueprint.to_dict()})
+    return _ok({"blueprint": blueprint.to_dict()})

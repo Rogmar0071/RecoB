@@ -4,6 +4,7 @@ ui_blueprint.domain
 AI-derived Domain Profiles and Blueprint Compiler.
 
 Exports:
+    SCHEMA_VERSION               -- canonical schema version string ("v1.1.0").
     DomainProfile                -- persisted domain profile.
     CaptureStep                  -- one step in the capture protocol.
     ProfileValidator             -- a validation rule.
@@ -25,8 +26,12 @@ Exports:
 """
 
 from ui_blueprint.domain.compiler import BlueprintCompileError, compileBlueprintFromMedia
-from ui_blueprint.domain.derivation import DomainDerivationProvider, StubDomainDerivationProvider
+from ui_blueprint.domain.derivation import (
+    DomainDerivationProvider,
+    StubDomainDerivationProvider,
+)
 from ui_blueprint.domain.ir import (
+    SCHEMA_VERSION,
     BlueprintConstraint,
     BlueprintEntity,
     BlueprintIR,
@@ -43,6 +48,7 @@ from ui_blueprint.domain.ir import (
 from ui_blueprint.domain.store import DomainProfileStore, InMemoryDomainProfileStore
 
 __all__ = [
+    "SCHEMA_VERSION",
     "DomainProfile",
     "CaptureStep",
     "ProfileValidator",

@@ -2,10 +2,13 @@
 ui_blueprint.domain.ir
 ======================
 Data models for AI-derived Domain Profiles and the Blueprint Intermediate
-Representation (IR).  Field shapes follow the steering contract v1.
+Representation (IR).  Field shapes follow the steering contract v1.1.0.
 
 All classes use plain Python dataclasses with to_dict / from_dict helpers
 so no new runtime dependencies are required.
+
+Every object carries a ``schema_version`` field so persisted data can be
+migrated when the contract evolves.
 """
 
 from __future__ import annotations
@@ -24,15 +27,46 @@ def _uuid4() -> str:
     return str(uuid.uuid4())
 
 
+# Canonical schema version for all objects produced by this module.
+SCHEMA_VERSION = "v1.1.0"
+
 # ---------------------------------------------------------------------------
 # Domain Profile sub-models
 # ---------------------------------------------------------------------------
 
 
 @dataclass
+class DerivedFrom:
+    """Provenance of the AI derivation that produced this profile."""
+
+    schema_version: str = SCHEMA_VERSION
+    media_id: str = ""
+    provider: str = "stub"
+    provider_version: str = "1.0"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "media_id": self.media_id,
+            "provider": self.provider,
+            "provider_version": self.provider_version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DerivedFrom":
+        return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
+            media_id=data.get("media_id", ""),
+            provider=data.get("provider", "stub"),
+            provider_version=data.get("provider_version", "1.0"),
+        )
+
+
+@dataclass
 class CaptureStep:
     """A single step in a domain's capture protocol."""
 
+    schema_version: str = SCHEMA_VERSION
     step_id: str = field(default_factory=_uuid4)
     title: str = ""
     instructions: str = ""
@@ -40,6 +74,7 @@ class CaptureStep:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "step_id": self.step_id,
             "title": self.title,
             "instructions": self.instructions,
@@ -49,6 +84,7 @@ class CaptureStep:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CaptureStep":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             step_id=data.get("step_id", _uuid4()),
             title=data.get("title", ""),
             instructions=data.get("instructions", ""),
@@ -60,16 +96,23 @@ class CaptureStep:
 class ProfileValidator:
     """A validation rule associated with a domain profile."""
 
+    schema_version: str = SCHEMA_VERSION
     id: str = field(default_factory=_uuid4)
     type: str = "generic"
     params: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "type": self.type, "params": dict(self.params)}
+        return {
+            "schema_version": self.schema_version,
+            "id": self.id,
+            "type": self.type,
+            "params": dict(self.params),
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProfileValidator":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             id=data.get("id", _uuid4()),
             type=data.get("type", "generic"),
             params=dict(data.get("params", {})),
@@ -80,43 +123,26 @@ class ProfileValidator:
 class ProfileExporter:
     """An export target associated with a domain profile."""
 
+    schema_version: str = SCHEMA_VERSION
     id: str = field(default_factory=_uuid4)
     type: str = "generic"
     params: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "type": self.type, "params": dict(self.params)}
+        return {
+            "schema_version": self.schema_version,
+            "id": self.id,
+            "type": self.type,
+            "params": dict(self.params),
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProfileExporter":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             id=data.get("id", _uuid4()),
             type=data.get("type", "generic"),
             params=dict(data.get("params", {})),
-        )
-
-
-@dataclass
-class DerivedFrom:
-    """Provenance of the AI derivation that produced this profile."""
-
-    media_id: str = ""
-    provider: str = "stub"
-    provider_version: str = "1.0"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "media_id": self.media_id,
-            "provider": self.provider,
-            "provider_version": self.provider_version,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DerivedFrom":
-        return cls(
-            media_id=data.get("media_id", ""),
-            provider=data.get("provider", "stub"),
-            provider_version=data.get("provider_version", "1.0"),
         )
 
 
@@ -143,9 +169,9 @@ class DomainProfile:
     Once confirmed a profile is immutable; edits require a new draft.
     """
 
+    schema_version: str = SCHEMA_VERSION
     id: str = field(default_factory=_uuid4)
     name: str = ""
-    schema_version: str = "1.0"
     status: str = DOMAIN_STATUS_DRAFT
     created_at: str = field(default_factory=_now_rfc3339)
     updated_at: str = field(default_factory=_now_rfc3339)
@@ -157,9 +183,9 @@ class DomainProfile:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "id": self.id,
             "name": self.name,
-            "schema_version": self.schema_version,
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -173,9 +199,9 @@ class DomainProfile:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DomainProfile":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             id=data.get("id", _uuid4()),
             name=data.get("name", ""),
-            schema_version=data.get("schema_version", "1.0"),
             status=data.get("status", DOMAIN_STATUS_DRAFT),
             created_at=data.get("created_at", _now_rfc3339()),
             updated_at=data.get("updated_at", _now_rfc3339()),
@@ -202,12 +228,16 @@ class DomainProfile:
 class BlueprintSource:
     """Provenance / source media reference for a BlueprintIR."""
 
+    schema_version: str = SCHEMA_VERSION
     media_id: str = ""
     start_time_ms: int | None = None
     end_time_ms: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"media_id": self.media_id}
+        d: dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "media_id": self.media_id,
+        }
         if self.start_time_ms is not None:
             d["start_time_ms"] = self.start_time_ms
         if self.end_time_ms is not None:
@@ -217,6 +247,7 @@ class BlueprintSource:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BlueprintSource":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             media_id=data.get("media_id", ""),
             start_time_ms=data.get("start_time_ms"),
             end_time_ms=data.get("end_time_ms"),
@@ -227,15 +258,21 @@ class BlueprintSource:
 class Completeness:
     """Completeness summary for a BlueprintIR."""
 
+    schema_version: str = SCHEMA_VERSION
     score: float = 0.0
     missing_info: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"score": self.score, "missing_info": list(self.missing_info)}
+        return {
+            "schema_version": self.schema_version,
+            "score": self.score,
+            "missing_info": list(self.missing_info),
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Completeness":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             score=float(data.get("score", 0.0)),
             missing_info=list(data.get("missing_info", [])),
         )
@@ -245,6 +282,7 @@ class Completeness:
 class BlueprintEntity:
     """A detected real-world component extracted from media."""
 
+    schema_version: str = SCHEMA_VERSION
     id: str = field(default_factory=_uuid4)
     type: str = "unknown"
     attributes: dict[str, Any] = field(default_factory=dict)
@@ -252,6 +290,7 @@ class BlueprintEntity:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "id": self.id,
             "type": self.type,
             "attributes": dict(self.attributes),
@@ -261,6 +300,7 @@ class BlueprintEntity:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BlueprintEntity":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             id=data.get("id", _uuid4()),
             type=data.get("type", "unknown"),
             attributes=dict(data.get("attributes", {})),
@@ -272,6 +312,7 @@ class BlueprintEntity:
 class BlueprintRelation:
     """A directional relationship between two BlueprintEntity nodes."""
 
+    schema_version: str = SCHEMA_VERSION
     id: str = field(default_factory=_uuid4)
     type: str = "related_to"
     source_entity_id: str = ""
@@ -281,6 +322,7 @@ class BlueprintRelation:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "id": self.id,
             "type": self.type,
             "source_entity_id": self.source_entity_id,
@@ -292,6 +334,7 @@ class BlueprintRelation:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BlueprintRelation":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             id=data.get("id", _uuid4()),
             type=data.get("type", "related_to"),
             source_entity_id=data.get("source_entity_id", ""),
@@ -305,6 +348,7 @@ class BlueprintRelation:
 class BlueprintConstraint:
     """A structural or geometric constraint derived from the domain schema."""
 
+    schema_version: str = SCHEMA_VERSION
     id: str = field(default_factory=_uuid4)
     type: str = "generic"
     entities: list[str] = field(default_factory=list)
@@ -313,6 +357,7 @@ class BlueprintConstraint:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "id": self.id,
             "type": self.type,
             "entities": list(self.entities),
@@ -323,6 +368,7 @@ class BlueprintConstraint:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BlueprintConstraint":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             id=data.get("id", _uuid4()),
             type=data.get("type", "generic"),
             entities=list(data.get("entities", [])),
@@ -335,15 +381,24 @@ class BlueprintConstraint:
 class ProvenanceRecord:
     """A single provenance entry describing evidence that produced IR content."""
 
+    schema_version: str = SCHEMA_VERSION
     kind: str = "unknown"
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"kind": self.kind, "details": dict(self.details)}
+        return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "details": dict(self.details),
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProvenanceRecord":
-        return cls(kind=data.get("kind", "unknown"), details=dict(data.get("details", {})))
+        return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
+            kind=data.get("kind", "unknown"),
+            details=dict(data.get("details", {})),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -361,9 +416,9 @@ class BlueprintIR:
     agents to reconstruct a real-world artifact or object.
     """
 
+    schema_version: str = SCHEMA_VERSION
     id: str = field(default_factory=_uuid4)
     domain_profile_id: str = ""
-    schema_version: str = "1.0"
     source: BlueprintSource = field(default_factory=BlueprintSource)
     completeness: Completeness = field(default_factory=Completeness)
     entities: list[BlueprintEntity] = field(default_factory=list)
@@ -373,9 +428,9 @@ class BlueprintIR:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "id": self.id,
             "domain_profile_id": self.domain_profile_id,
-            "schema_version": self.schema_version,
             "source": self.source.to_dict(),
             "completeness": self.completeness.to_dict(),
             "entities": [e.to_dict() for e in self.entities],
@@ -387,9 +442,9 @@ class BlueprintIR:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BlueprintIR":
         return cls(
+            schema_version=data.get("schema_version", SCHEMA_VERSION),
             id=data.get("id", _uuid4()),
             domain_profile_id=data.get("domain_profile_id", ""),
-            schema_version=data.get("schema_version", "1.0"),
             source=BlueprintSource.from_dict(data.get("source", {})),
             completeness=Completeness.from_dict(data.get("completeness", {})),
             entities=[BlueprintEntity.from_dict(e) for e in data.get("entities", [])],
