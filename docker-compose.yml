@@ -1,4 +1,25 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: uiblueprint
+      POSTGRES_PASSWORD: uiblueprint
+      POSTGRES_DB: uiblueprint
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uiblueprint"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  valkey:
+    image: valkey/valkey:7-alpine
+    restart: unless-stopped
+    volumes:
+      - valkey_data:/data
+
   backend:
     build:
       context: .
@@ -10,9 +31,44 @@ services:
       # Set a strong random token here or export it from a .env file.
       - API_KEY=${API_KEY:-change-me}
       - DATA_DIR=/data
+      - DATABASE_URL=postgresql+psycopg2://uiblueprint:uiblueprint@postgres/uiblueprint
+      - REDIS_URL=redis://valkey:6379/0
+      # R2 storage (optional – set these to enable object storage)
+      - R2_ENDPOINT=${R2_ENDPOINT:-}
+      - R2_BUCKET=${R2_BUCKET:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
     volumes:
       - ui_blueprint_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: ui-blueprint-backend:latest
+    command: >
+      sh -c "python -m rq worker --url ${REDIS_URL:-redis://valkey:6379/0} default"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://uiblueprint:uiblueprint@postgres/uiblueprint
+      - REDIS_URL=redis://valkey:6379/0
+      - R2_ENDPOINT=${R2_ENDPOINT:-}
+      - R2_BUCKET=${R2_BUCKET:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
   ui_blueprint_data:
+  pg_data:
+  valkey_data:
