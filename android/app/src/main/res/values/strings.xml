@@ -4,6 +4,7 @@
     <string name="btn_record">Record 20 s</string>
     <string name="btn_analyze">Analyze</string>
     <string name="btn_chat">Chat</string>
+    <string name="btn_pick_gallery">Pick from Gallery</string>
     <string name="btn_send">Send</string>
     <string name="hint_chat_input">Type a message…</string>
     <string name="status_idle">Ready</string>
@@ -14,7 +15,22 @@
     <string name="status_upload_enqueued">Upload enqueued…</string>
     <string name="status_upload_succeeded">Upload succeeded.</string>
     <string name="status_upload_failed">Upload failed.</string>
-    <string name="label_sessions">Sessions</string>
+    <string name="status_picking_gallery">Opening gallery…</string>
+    <string name="status_gallery_creating_folder">Creating folder…</string>
+    <string name="status_gallery_uploading_clip">Uploading clip…</string>
+    <string name="label_sessions">Folders</string>
     <string name="label_backend_url">Backend: %1$s</string>
     <string name="status_chat_retrying">(Waking backend… retrying %1$d/%2$d)</string>
+    <!-- FolderDetailActivity strings -->
+    <string name="folder_detail_title">Folder</string>
+    <string name="label_folder_status">Status: %1$s</string>
+    <string name="label_folder_id">ID: %1$s</string>
+    <string name="label_jobs">Jobs</string>
+    <string name="label_artifacts">Artifacts</string>
+    <string name="label_chat">Chat</string>
+    <string name="folder_loading">Loading…</string>
+    <string name="folder_load_error">Failed to load folder.</string>
+    <string name="folder_no_jobs">No jobs yet.</string>
+    <string name="folder_no_artifacts">No artifacts yet.</string>
+    <string name="folder_chat_retrying">(Retrying %1$d/%2$d…)</string>
 </resources>
