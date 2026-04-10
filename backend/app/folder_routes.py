@@ -36,7 +36,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from backend.app.auth import require_auth
 from ui_blueprint.domain.ir import SCHEMA_VERSION
@@ -522,7 +522,10 @@ def post_message(
         request = FolderChatPostRequest.model_validate(body or {})
     except ValidationError as exc:
         if any(error["loc"] == ("message",) for error in exc.errors()):
-            raise HTTPException(status_code=400, detail="message is required and must not be empty.") from None
+            raise HTTPException(
+                status_code=400,
+                detail="message is required and must not be empty.",
+            ) from None
         raise HTTPException(status_code=422, detail=exc.errors()) from None
 
     content = request.message
