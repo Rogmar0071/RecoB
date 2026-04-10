@@ -441,6 +441,11 @@ class MainActivity : AppCompatActivity() {
      * Build an OkHttp [RequestBody] that streams bytes from [uri] via the
      * [ContentResolver] without loading the entire file into memory.
      *
+     * @param uri      Content URI of the video to upload.
+     * @param mimeType MIME type sent as the Content-Type for this part (e.g.
+     *                 "video/mp4"). Should match the actual content; a mismatch
+     *                 is passed through as-is without validation.
+     *
      * The content length is queried from [OpenableColumns.SIZE] so OkHttp can
      * set an accurate Content-Length header; -1 is returned when the size is
      * unavailable (chunked transfer encoding will be used instead).

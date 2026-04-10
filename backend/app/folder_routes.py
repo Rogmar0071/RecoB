@@ -531,8 +531,9 @@ def post_message(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) 
             f"(id={enqueued_job.id}, status=queued)."
         )
 
-    # Call OpenAI Responses API with the latest message excluded from history
-    # (history[:-1] = all messages before the user's current one).
+    # Call OpenAI Responses API.  history[-1] is the user message we just
+    # saved, so we pass history[:-1] (prior conversation) to avoid duplicating
+    # it — _call_openai_responses_api appends `content` as the last message.
     reply_text = _call_openai_responses_api(content, history[:-1], openai_key, folder_context)
 
     # Persist assistant reply.
