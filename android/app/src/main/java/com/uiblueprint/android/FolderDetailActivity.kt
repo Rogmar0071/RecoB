@@ -505,7 +505,7 @@ class FolderDetailActivity : AppCompatActivity() {
         for (i in 0 until jobs.length()) {
             val job = jobs.getJSONObject(i)
             if (job.optString("type") == "analyze" &&
-                job.optString("status") in setOf("queued", "running")
+                job.optString("status") in ACTIVE_JOB_STATUSES
             ) {
                 return true
             }
@@ -594,18 +594,19 @@ class FolderDetailActivity : AppCompatActivity() {
         // Manage Analyze button state and polling based on active analyze jobs.
         val hasActiveJob = hasActiveAnalyzeJob(jobs)
         if (hasActiveJob) {
-            // Since hasActiveJob is true, jobs is non-null here.
-            // Find the status of the first analyze job (jobs are typically ordered
-            // chronologically, so this reflects the most recently enqueued one).
-            val firstAnalyzeStatus = run {
-                for (i in 0 until jobs.length()) {
-                    val job = jobs.getJSONObject(i)
-                    if (job.optString("type") == "analyze") return@run job.optString("status")
+            // hasActiveJob being true guarantees jobs is non-null and contains an active
+            // analyze job. Use the status of the first matching active job to set the
+            // button label. The backend returns jobs in insertion order (oldest first),
+            // so the active job found first is the earliest still-running one.
+            val activeAnalyzeStatus = (0 until jobs.length())
+                .map { jobs.getJSONObject(it) }
+                .firstOrNull {
+                    it.optString("type") == "analyze" &&
+                        it.optString("status") in ACTIVE_JOB_STATUSES
                 }
-                "queued"
-            }
+                ?.optString("status") ?: "queued" // unreachable: guaranteed by hasActiveJob
             binding.btnAnalyze.isEnabled = false
-            binding.btnAnalyze.text = if (firstAnalyzeStatus == "running") {
+            binding.btnAnalyze.text = if (activeAnalyzeStatus == "running") {
                 getString(R.string.btn_analyze_running)
             } else {
                 getString(R.string.btn_analyze_queued)
@@ -735,6 +736,7 @@ class FolderDetailActivity : AppCompatActivity() {
         const val EXTRA_FOLDER_ID = "folder_id"
         private const val RECORDING_TIMEOUT_MS = 30_000L
         private const val POLL_INTERVAL_MS = 2_000L
+        private val ACTIVE_JOB_STATUSES = setOf("queued", "running")
         private const val ERROR_PERMISSION_DENIED = "Screen capture permission denied"
         private const val ERROR_START_FAILED = "Capture failed to start recording."
     }
