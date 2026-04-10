@@ -66,6 +66,10 @@ API_KEY=dev-secret uvicorn backend.app.main:app --reload
 API_KEY=my-secret docker compose up --build
 ```
 
+The backend container entrypoint runs `alembic -c backend/alembic.ini upgrade head`
+before starting Uvicorn. On platforms like Render, the image can be started as-is,
+or you can explicitly run `bash backend/entrypoint.sh`.
+
 Upload a clip:
 
 ```bash
