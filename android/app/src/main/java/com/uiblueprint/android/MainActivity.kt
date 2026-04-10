@@ -92,9 +92,9 @@ class MainActivity : AppCompatActivity() {
         )
         binding.drawerLayout.addDrawerListener(drawerToggle)
 
-        // Adjust drawer width to be at least half the screen but not exceed screen width.
+        // Adjust drawer width: at least drawer_min_width, or half the screen on wider devices.
         val screenWidth = resources.displayMetrics.widthPixels
-        val minWidthPx = (320 * resources.displayMetrics.density).toInt()
+        val minWidthPx = resources.getDimensionPixelSize(R.dimen.drawer_min_width)
         val targetWidthPx = maxOf(minWidthPx, screenWidth / 2)
         val drawerParams = binding.drawerPanel.layoutParams as DrawerLayout.LayoutParams
         drawerParams.width = targetWidthPx

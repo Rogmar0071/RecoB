@@ -99,7 +99,7 @@
          ═══════════════════════════════════════════════════════════════════ -->
     <LinearLayout
         android:id="@+id/drawerPanel"
-        android:layout_width="320dp"
+        android:layout_width="@dimen/drawer_min_width"
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:orientation="vertical"
