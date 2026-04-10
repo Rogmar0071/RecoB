@@ -238,13 +238,40 @@ class TestUploadClip:
 # POST /v1/folders/{id}/messages  — chat
 # ---------------------------------------------------------------------------
 
+_MOCK_REPLY = "Mocked AI reply."
+
+
+def _mock_openai(message, history, api_key, folder_context=""):
+    """Test-only stand-in for _call_openai_responses_api."""
+    return _MOCK_REPLY
+
 
 class TestFolderChat:
-    def test_post_message_stub_reply(
+    def test_post_message_no_openai_key_returns_503(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When OPENAI_API_KEY absent, stub reply is returned and persisted."""
+        """When OPENAI_API_KEY is absent the endpoint returns HTTP 503."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp = client.post(
+            f"/v1/folders/{fid}/messages",
+            json={"message": "What does this clip show?"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 503
+        assert "OPENAI_API_KEY" in resp.json()["detail"]
+
+    def test_post_message_returns_ai_reply(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When OPENAI_API_KEY is set, the AI reply is persisted and returned."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        import backend.app.folder_routes as fr
+
+        monkeypatch.setattr(fr, "_call_openai_responses_api", _mock_openai)
 
         folder = _create_folder(client)
         fid = folder["id"]
@@ -260,13 +287,17 @@ class TestFolderChat:
         assert "assistant_message" in body
         assert body["user_message"]["role"] == "user"
         assert body["assistant_message"]["role"] == "assistant"
-        assert "Stub" in body["assistant_message"]["content"]
+        assert body["assistant_message"]["content"] == _MOCK_REPLY
         assert "tools_available" in body
 
     def test_post_message_persisted(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        """User + assistant messages are both stored in the database."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        import backend.app.folder_routes as fr
+
+        monkeypatch.setattr(fr, "_call_openai_responses_api", _mock_openai)
 
         folder = _create_folder(client)
         fid = folder["id"]
@@ -286,6 +317,7 @@ class TestFolderChat:
     def test_post_message_empty_returns_400(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Empty message is rejected before the key check."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
         folder = _create_folder(client)
@@ -301,6 +333,7 @@ class TestFolderChat:
     def test_post_message_nonexistent_folder_returns_404(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Non-existent folder is detected before the key check."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         resp = client.post(
             f"/v1/folders/{uuid.uuid4()}/messages",
@@ -308,6 +341,93 @@ class TestFolderChat:
             headers=_auth(),
         )
         assert resp.status_code == 404
+
+    def test_analyze_intent_enqueues_job(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A message matching the 'analyze' intent auto-enqueues an analyze job."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        import backend.app.folder_routes as fr
+
+        monkeypatch.setattr(fr, "_call_openai_responses_api", _mock_openai)
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp = client.post(
+            f"/v1/folders/{fid}/messages",
+            json={"message": "Please analyze this clip"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert "enqueued_job" in body
+        assert body["enqueued_job"]["type"] == "analyze"
+        assert body["enqueued_job"]["status"] == "queued"
+
+    def test_compile_intent_enqueues_blueprint_job(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A message matching the 'compile' intent auto-enqueues a blueprint job."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        import backend.app.folder_routes as fr
+
+        monkeypatch.setattr(fr, "_call_openai_responses_api", _mock_openai)
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp = client.post(
+            f"/v1/folders/{fid}/messages",
+            json={"message": "compile the blueprint now"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert "enqueued_job" in body
+        assert body["enqueued_job"]["type"] == "blueprint"
+
+    def test_status_intent_does_not_enqueue_job(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A status-check message does NOT enqueue a job."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        import backend.app.folder_routes as fr
+
+        monkeypatch.setattr(fr, "_call_openai_responses_api", _mock_openai)
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp = client.post(
+            f"/v1/folders/{fid}/messages",
+            json={"message": "what is the status?"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert "enqueued_job" not in body
+
+    def test_generic_message_does_not_enqueue_job(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A generic question does not trigger job enqueuing."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        import backend.app.folder_routes as fr
+
+        monkeypatch.setattr(fr, "_call_openai_responses_api", _mock_openai)
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp = client.post(
+            f"/v1/folders/{fid}/messages",
+            json={"message": "What is a blueprint?"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert "enqueued_job" not in body
 
 
 # ---------------------------------------------------------------------------

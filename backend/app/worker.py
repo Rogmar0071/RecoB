@@ -177,7 +177,8 @@ def run_analyze(job_id: str) -> None:
     Download the clip from R2, run ``ui_blueprint extract``, upload outputs.
 
     Updates the ``jobs`` row with running/succeeded/failed status throughout.
-    Also uploads blueprint JSON to R2 and creates Artifact rows.
+    Produces ``analysis.json`` (and ``analysis.md``) and stores them in R2 as
+    ``analysis_json`` / ``analysis_md`` Artifact rows.
     """
     job = _get_job(job_id)
     if job is None:
@@ -204,16 +205,16 @@ def run_analyze(job_id: str) -> None:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             clip_path = os.path.join(tmpdir, "clip.mp4")
-            blueprint_path = os.path.join(tmpdir, "blueprint.json")
+            analysis_path = os.path.join(tmpdir, "analysis.json")
 
             with open(clip_path, "wb") as fh:
                 fh.write(clip_bytes)
 
             _update_job(job_id, progress=20)
 
-            # Run extractor.
+            # Run extractor — output saved as analysis.json.
             result = subprocess.run(
-                [sys.executable, "-m", "ui_blueprint", "extract", clip_path, "-o", blueprint_path],
+                [sys.executable, "-m", "ui_blueprint", "extract", clip_path, "-o", analysis_path],
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -223,26 +224,26 @@ def run_analyze(job_id: str) -> None:
 
             _update_job(job_id, progress=70)
 
-            # Upload blueprint JSON to R2.
-            with open(blueprint_path, "rb") as fh:
-                bp_bytes = fh.read()
+            # Upload analysis.json as analysis_json artifact.
+            with open(analysis_path, "rb") as fh:
+                analysis_bytes = fh.read()
 
-            bp_key = storage.upload_bytes(
-                folder_id, "blueprint.json", bp_bytes, "application/json"
+            analysis_key = storage.upload_bytes(
+                folder_id, "analysis.json", analysis_bytes, "application/json"
             )
-            _create_artifact(folder_id, "blueprint_json", bp_key)
+            _create_artifact(folder_id, "analysis_json", analysis_key)
 
             _update_job(job_id, progress=90)
 
-            # Also upload a Markdown version if available.
-            md_path = blueprint_path.replace(".json", ".md")
+            # Upload analysis.md as analysis_md artifact if produced alongside.
+            md_path = analysis_path.replace(".json", ".md")
             if os.path.exists(md_path):
                 with open(md_path, "rb") as fh:
                     md_bytes = fh.read()
                 md_key = storage.upload_bytes(
-                    folder_id, "blueprint.md", md_bytes, "text/markdown"
+                    folder_id, "analysis.md", md_bytes, "text/markdown"
                 )
-                _create_artifact(folder_id, "blueprint_md", md_key)
+                _create_artifact(folder_id, "analysis_md", md_key)
 
         _update_job(job_id, status="succeeded", progress=100)
         _update_folder_status(folder_id, "done")
@@ -255,10 +256,12 @@ def run_analyze(job_id: str) -> None:
 
 def run_blueprint(job_id: str) -> None:
     """
-    Compile a blueprint from an existing analysis JSON artifact.
+    Compile a blueprint from the folder's ``analysis_json`` artifact.
 
-    Looks for the most recent ``blueprint_json`` artifact in R2, re-runs
-    ``ui_blueprint preview`` to regenerate outputs, and uploads any new files.
+    Downloads the analysis JSON, runs ``ui_blueprint preview`` to render
+    preview PNGs (stored as ``preview_png`` artifacts), then uploads the
+    analysis JSON as ``blueprint.json`` and generates a Markdown summary
+    as ``blueprint.md`` (``blueprint_json`` / ``blueprint_md`` artifacts).
     """
     job = _get_job(job_id)
     if job is None:
@@ -269,45 +272,48 @@ def run_blueprint(job_id: str) -> None:
     _update_job(job_id, status="running", progress=10)
 
     try:
+        import json
+
         from sqlmodel import Session, select
 
         from backend.app import storage
         from backend.app.database import get_engine
         from backend.app.models import Artifact
 
-        # Find the latest blueprint_json artifact.
+        # Find the latest analysis_json artifact.
         with Session(get_engine()) as session:
             artifact = session.exec(
                 select(Artifact)
                 .where(Artifact.folder_id == uuid.UUID(folder_id))
-                .where(Artifact.type == "blueprint_json")
+                .where(Artifact.type == "analysis_json")
                 .order_by(Artifact.created_at.desc())
             ).first()
 
         if artifact is None:
-            raise RuntimeError("No blueprint_json artifact found; run analyze first.")
+            raise RuntimeError("No analysis_json artifact found; run analyze first.")
 
-        bp_bytes = storage.get_object_bytes(artifact.object_key)
-        if bp_bytes is None:
-            raise RuntimeError(f"Blueprint JSON not found in storage: {artifact.object_key}")
+        analysis_bytes = storage.get_object_bytes(artifact.object_key)
+        if analysis_bytes is None:
+            raise RuntimeError(f"Analysis JSON not found in storage: {artifact.object_key}")
 
-        _update_job(job_id, progress=40)
+        _update_job(job_id, progress=30)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            blueprint_path = os.path.join(tmpdir, "blueprint.json")
+            analysis_path = os.path.join(tmpdir, "analysis.json")
             preview_dir = os.path.join(tmpdir, "preview")
             os.makedirs(preview_dir)
 
-            with open(blueprint_path, "wb") as fh:
-                fh.write(bp_bytes)
+            with open(analysis_path, "wb") as fh:
+                fh.write(analysis_bytes)
 
+            # Run preview to generate PNG frames.
             result = subprocess.run(
                 [
                     sys.executable,
                     "-m",
                     "ui_blueprint",
                     "preview",
-                    blueprint_path,
+                    analysis_path,
                     "--out",
                     preview_dir,
                 ],
@@ -318,10 +324,10 @@ def run_blueprint(job_id: str) -> None:
             if result.returncode != 0:
                 raise RuntimeError(f"Preview failed: {result.stderr.strip()}")
 
-            _update_job(job_id, progress=80)
+            _update_job(job_id, progress=70)
 
-            # Upload preview PNGs as artifacts.
-            for fname in os.listdir(preview_dir):
+            # Upload preview PNGs as preview_png artifacts.
+            for fname in sorted(os.listdir(preview_dir)):
                 if not fname.endswith(".png"):
                     continue
                 with open(os.path.join(preview_dir, fname), "rb") as fh:
@@ -329,11 +335,65 @@ def run_blueprint(job_id: str) -> None:
                 key = storage.upload_bytes(folder_id, f"preview/{fname}", png_bytes, "image/png")
                 _create_artifact(folder_id, "preview_png", key)
 
+            _update_job(job_id, progress=85)
+
+            # Upload analysis JSON as blueprint.json (blueprint_json artifact).
+            bp_key = storage.upload_bytes(
+                folder_id, "blueprint.json", analysis_bytes, "application/json"
+            )
+            _create_artifact(folder_id, "blueprint_json", bp_key)
+
+            # Generate and upload a Markdown summary (blueprint_md artifact).
+            analysis_data = json.loads(analysis_bytes)
+            bp_md_bytes = _analysis_to_blueprint_md(analysis_data).encode("utf-8")
+            md_key = storage.upload_bytes(
+                folder_id, "blueprint.md", bp_md_bytes, "text/markdown"
+            )
+            _create_artifact(folder_id, "blueprint_md", md_key)
+
         _update_job(job_id, status="succeeded", progress=100)
 
     except Exception as exc:
         logger.exception("run_blueprint failed for job %s", job_id)
         _update_job(job_id, status="failed", error=str(exc))
+
+
+def _analysis_to_blueprint_md(data: dict) -> str:
+    """Generate a human-readable Markdown summary from an analysis JSON dict."""
+    lines = ["# Blueprint\n"]
+
+    meta = data.get("meta", {})
+    if meta:
+        lines.append("## Recording Details\n")
+        for key, val in list(meta.items())[:12]:
+            lines.append(f"- **{key}**: {val}")
+        lines.append("")
+
+    elements = data.get("elements_catalog", [])
+    if elements:
+        by_type: dict[str, int] = {}
+        for el in elements:
+            t = el.get("type", "unknown")
+            by_type[t] = by_type.get(t, 0) + 1
+        lines.append(f"## UI Elements ({len(elements)} detected)\n")
+        for t, count in sorted(by_type.items(), key=lambda x: -x[1]):
+            lines.append(f"- **{t}**: {count}")
+        lines.append("")
+
+    chunks = data.get("chunks", [])
+    if chunks:
+        lines.append(f"## Timeline ({len(chunks)} chunk(s))\n")
+        for chunk in chunks[:8]:
+            t0 = chunk.get("t0_ms", 0)
+            t1 = chunk.get("t1_ms", 0)
+            tracks = chunk.get("tracks", [])
+            events = chunk.get("events", [])
+            lines.append(f"- **{t0}–{t1} ms**: {len(tracks)} tracks, {len(events)} events")
+        if len(chunks) > 8:
+            lines.append(f"- *…and {len(chunks) - 8} more chunk(s)*")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

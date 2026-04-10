@@ -201,7 +201,7 @@ To serve over HTTPS, install Nginx + Certbot, configure a proxy_pass to `localho
 | `R2_BUCKET` | *(empty)* | R2 bucket name |
 | `R2_ACCESS_KEY_ID` | *(empty)* | R2 access key ID |
 | `R2_SECRET_ACCESS_KEY` | *(empty)* | R2 secret access key |
-| `OPENAI_API_KEY` | *(empty — AI disabled)* | Server-side OpenAI credential — enables AI-backed domain derivation and `/api/chat`. **Never returned to clients.** |
+| `OPENAI_API_KEY` | *(empty — folder chat returns 503)* | Server-side OpenAI credential — required for `/v1/folders/{id}/messages` (returns HTTP 503 when absent). Also enables AI-backed domain derivation and `/api/chat`. **Never returned to clients.** |
 | `OPENAI_MODEL_DOMAIN` | `gpt-4.1-mini` | Model used for domain derivation |
 | `OPENAI_MODEL_CHAT` | `gpt-4.1-mini` | Model used for `/api/chat` and folder chat |
 | `OPENAI_BASE_URL` | `https://api.openai.com` | OpenAI base URL (strip trailing `/v1` if present — added automatically) |

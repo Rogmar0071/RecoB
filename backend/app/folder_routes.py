@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -340,8 +341,9 @@ _FOLDER_CHAT_SYSTEM_PROMPT = (
     "You help users understand their recorded screen clips and derived blueprints. "
     "You can suggest analysis steps, explain blueprint output, and answer questions about "
     "UI structure. Be concise, practical, and friendly. "
-    "When relevant, mention the actions available: analyze (extract blueprint from clip), "
-    "status (check job status), and compile (re-compile blueprint)."
+    "The folder context below shows the current processing status, jobs, and artifacts. "
+    "When the user asks to analyze, compile, or check status, confirm the action taken and "
+    "summarize the current state."
 )
 
 _FOLDER_TOOLS_AVAILABLE = [
@@ -351,38 +353,133 @@ _FOLDER_TOOLS_AVAILABLE = [
     "folders.list_artifacts",
 ]
 
+# Intent detection patterns.
+_RE_ANALYZE = re.compile(r"\b(analy[sz]e|extract|run\s+analy|start\s+analy)\b", re.I)
+_RE_COMPILE = re.compile(
+    r"\b(compile|generate\s+blueprint|build\s+blueprint|create\s+blueprint|run\s+blueprint)\b",
+    re.I,
+)
+_RE_STATUS = re.compile(
+    r"\b(status|progress|how\s+(is|are|long)|done\??|finished|complete\??)\b",
+    re.I,
+)
+
+
+def _detect_intent(message: str) -> str | None:
+    """Return 'analyze', 'blueprint', 'status', or None."""
+    if _RE_ANALYZE.search(message):
+        return "analyze"
+    if _RE_COMPILE.search(message):
+        return "blueprint"
+    if _RE_STATUS.search(message):
+        return "status"
+    return None
+
+
+def _build_folder_context(folder, jobs: list, artifacts: list) -> str:
+    """Build a plain-text context string describing the folder's current state."""
+    lines = [f"Folder status: {folder.status}"]
+
+    if jobs:
+        lines.append("Jobs (most recent first):")
+        for job in jobs[:5]:
+            line = f"  - {job.type}: {job.status}"
+            if job.progress:
+                line += f" ({job.progress}%)"
+            if job.error:
+                line += f" [error: {job.error[:100]}]"
+            lines.append(line)
+    else:
+        lines.append("Jobs: none yet.")
+
+    if artifacts:
+        lines.append("Artifacts:")
+        for artifact in artifacts[:10]:
+            lines.append(f"  - {artifact.type}")
+    else:
+        lines.append("Artifacts: none yet.")
+
+    return "\n".join(lines)
+
+
+def _call_openai_responses_api(
+    message: str,
+    history: list,
+    api_key: str,
+    folder_context: str = "",
+) -> str:
+    """Call the OpenAI Responses API with conversation history and folder context."""
+    from openai import OpenAI
+
+    model = os.environ.get("OPENAI_MODEL_CHAT", "gpt-4.1-mini")
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com").rstrip("/")
+    timeout = float(os.environ.get("OPENAI_TIMEOUT_SECONDS", "30"))
+
+    client = OpenAI(api_key=api_key, base_url=f"{base_url}/v1", timeout=timeout)
+
+    instructions = _FOLDER_CHAT_SYSTEM_PROMPT
+    if folder_context:
+        instructions += f"\n\n--- Current folder state ---\n{folder_context}"
+
+    input_messages = []
+    for msg in history:
+        if msg.role in ("user", "assistant"):
+            input_messages.append({"role": msg.role, "content": msg.content})
+    input_messages.append({"role": "user", "content": message})
+
+    response = client.responses.create(
+        model=model,
+        instructions=instructions,
+        input=input_messages,
+    )
+    return response.output_text
+
 
 @router.post("/{folder_id}/messages", status_code=201, dependencies=[Depends(require_auth)])
 def post_message(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) -> JSONResponse:
     """
     Send a user message to the folder's chat.
 
-    The assistant reply is generated via OpenAI (when OPENAI_API_KEY is set) or
-    a deterministic stub.  Both the user message and the AI reply are persisted
-    as ``FolderMessage`` rows.
+    Requires ``OPENAI_API_KEY`` to be set; returns HTTP 503 otherwise.
+
+    Intent routing: if the message asks to analyze/compile a clip or check status,
+    the appropriate RQ job is enqueued automatically and its details are included
+    in the response alongside the AI reply.
 
     Request body::
 
-        {"message": "What does my recording show?"}
+        {"message": "analyze this clip"}
 
     Response::
 
         {
           "user_message": {...},
           "assistant_message": {...},
-          "tools_available": [...]
+          "tools_available": [...],
+          "enqueued_job": {...}   // present only when a job was enqueued
         }
     """
     from sqlmodel import select
 
-    from backend.app.models import FolderMessage
+    from backend.app.models import Artifact, FolderMessage, Job
 
     fid = _parse_uuid(folder_id, "folder_id")
-    _folder_or_404(db, fid)
+    folder = _folder_or_404(db, fid)
 
     content: str = str(body.get("message", "")).strip()
     if not content:
         raise HTTPException(status_code=400, detail="message is required and must not be empty.")
+
+    # Require OpenAI API key — no stub fallback.
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not openai_key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "OPENAI_API_KEY is not configured on this server. "
+                "Folder chat requires OpenAI to be enabled."
+            ),
+        )
 
     # Persist user message.
     user_msg = FolderMessage(folder_id=fid, role="user", content=content)
@@ -390,21 +487,53 @@ def post_message(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) 
     db.commit()
     db.refresh(user_msg)
 
-    # Build conversation history (last 20 messages).
+    # Build conversation history (last 20 messages, excluding the one just saved).
     history = db.exec(
         select(FolderMessage)
         .where(FolderMessage.folder_id == fid)
         .order_by(FolderMessage.created_at.desc())
         .limit(20)
     ).all()
-    history = list(reversed(history))  # chronological order
+    history = list(reversed(history))
 
-    # Generate AI reply.
-    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if openai_key:
-        reply_text = _call_openai_folder_chat(content, history[:-1], openai_key)
-    else:
-        reply_text = _stub_folder_reply(content)
+    # ---------- Intent routing -------------------------------------------
+    intent = _detect_intent(content)
+    enqueued_job = None
+
+    if intent in ("analyze", "blueprint"):
+        from backend.app import worker
+
+        new_job = Job(folder_id=fid, type=intent)
+        db.add(new_job)
+        db.commit()
+        db.refresh(new_job)
+        rq_id = worker.enqueue_job(str(new_job.id), intent)
+        if rq_id:
+            new_job.rq_job_id = rq_id
+            db.add(new_job)
+            db.commit()
+            db.refresh(new_job)
+        enqueued_job = new_job
+    # -----------------------------------------------------------------------
+
+    # Build folder context (refresh job/artifact lists after possible enqueue).
+    jobs = db.exec(
+        select(Job).where(Job.folder_id == fid).order_by(Job.created_at.desc()).limit(10)
+    ).all()
+    artifacts = db.exec(
+        select(Artifact).where(Artifact.folder_id == fid).order_by(Artifact.created_at.desc())
+    ).all()
+
+    folder_context = _build_folder_context(folder, jobs, artifacts)
+    if enqueued_job:
+        folder_context += (
+            f"\n\nAction taken: enqueued a new {enqueued_job.type} job "
+            f"(id={enqueued_job.id}, status=queued)."
+        )
+
+    # Call OpenAI Responses API with the latest message excluded from history
+    # (history[:-1] = all messages before the user's current one).
+    reply_text = _call_openai_responses_api(content, history[:-1], openai_key, folder_context)
 
     # Persist assistant reply.
     assistant_msg = FolderMessage(folder_id=fid, role="assistant", content=reply_text)
@@ -412,58 +541,15 @@ def post_message(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) 
     db.commit()
     db.refresh(assistant_msg)
 
-    return JSONResponse(
-        content={
-            "user_message": _message_dict(user_msg),
-            "assistant_message": _message_dict(assistant_msg),
-            "tools_available": _FOLDER_TOOLS_AVAILABLE,
-        },
-        status_code=201,
-    )
-
-
-def _stub_folder_reply(message: str) -> str:
-    return (
-        f"[Stub] Received: {message!r}. "
-        "Set OPENAI_API_KEY on the server to enable AI-powered folder chat."
-    )
-
-
-def _call_openai_folder_chat(
-    message: str, history: list, api_key: str
-) -> str:
-    """Call OpenAI with the full folder conversation history."""
-    import httpx
-
-    from ui_blueprint.domain.openai_provider import _build_completions_url
-
-    model = os.environ.get("OPENAI_MODEL_CHAT", "gpt-4.1-mini")
-    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
-    timeout = float(os.environ.get("OPENAI_TIMEOUT_SECONDS", 30.0))
-    url = _build_completions_url(base_url)
-
-    messages = [{"role": "system", "content": _FOLDER_CHAT_SYSTEM_PROMPT}]
-    for msg in history:
-        if msg.role in ("user", "assistant"):
-            messages.append({"role": msg.role, "content": msg.content})
-    messages.append({"role": "user", "content": message})
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": 512,
-        "temperature": 0.7,
+    result: dict[str, Any] = {
+        "user_message": _message_dict(user_msg),
+        "assistant_message": _message_dict(assistant_msg),
+        "tools_available": _FOLDER_TOOLS_AVAILABLE,
     }
+    if enqueued_job:
+        result["enqueued_job"] = _job_dict(enqueued_job)
 
-    with httpx.Client(timeout=timeout) as http:
-        response = http.post(
-            url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-        )
-    response.raise_for_status()
-    data = response.json()
-    return data["choices"][0]["message"]["content"].strip()
+    return JSONResponse(content=result, status_code=201)
 
 
 # ---------------------------------------------------------------------------

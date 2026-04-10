@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
@@ -22,7 +23,10 @@ import com.uiblueprint.android.databinding.ActivityMainBinding
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.source
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -367,7 +371,8 @@ class MainActivity : AppCompatActivity() {
      * Called when the user picks a video from the gallery.
      *
      * 1. Creates a new folder via POST /v1/folders
-     * 2. Reads the video bytes from the content URI
+     * 2. Streams the video directly from the content URI via a multipart upload
+     *    (no readBytes() — avoids loading the entire file into memory)
      * 3. Uploads via POST /v1/folders/{id}/clip
      * 4. Adds the folder to the in-memory list so it appears in the UI
      */
@@ -397,21 +402,14 @@ class MainActivity : AppCompatActivity() {
                     addFolderItem(FolderItem(folderId, "uploading", uri.lastPathSegment ?: "gallery"))
                 }
 
-                // Step 2 — read video bytes.
-                val videoBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw IOException("Could not read video from gallery")
-
-                // Step 3 — upload clip.
+                // Step 2 — build a streaming multipart body (no readBytes()).
                 val fileName = uri.lastPathSegment ?: "clip.mp4"
                 val clipBody = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
-                    .addFormDataPart(
-                        "clip",
-                        fileName,
-                        videoBytes.toRequestBody("video/mp4".toMediaType()),
-                    )
+                    .addFormDataPart("clip", fileName, uriRequestBody(uri, "video/mp4"))
                     .build()
 
+                // Step 3 — upload clip.
                 val uploadRequest = Request.Builder()
                     .url("$baseUrl/v1/folders/$folderId/clip")
                     .post(clipBody)
@@ -435,6 +433,40 @@ class MainActivity : AppCompatActivity() {
                         Toast.LENGTH_LONG,
                     ).show()
                 }
+            }
+        }
+    }
+
+    /**
+     * Build an OkHttp [RequestBody] that streams bytes from [uri] via the
+     * [ContentResolver] without loading the entire file into memory.
+     *
+     * The content length is queried from [OpenableColumns.SIZE] so OkHttp can
+     * set an accurate Content-Length header; -1 is returned when the size is
+     * unavailable (chunked transfer encoding will be used instead).
+     */
+    private fun uriRequestBody(uri: Uri, mimeType: String): RequestBody {
+        val contentLen = contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.SIZE),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                cursor.getLong(cursor.getColumnIndexOrThrow(OpenableColumns.SIZE))
+            } else {
+                -1L
+            }
+        } ?: -1L
+
+        return object : RequestBody() {
+            override fun contentType() = mimeType.toMediaType()
+            override fun contentLength() = contentLen
+            override fun writeTo(sink: BufferedSink) {
+                contentResolver.openInputStream(uri)?.use { stream ->
+                    sink.writeAll(stream.source())
+                } ?: throw IOException("Could not open input stream for $uri")
             }
         }
     }
