@@ -53,9 +53,29 @@ app = FastAPI(title="UI Blueprint Backend", version="1.0.0")
 # Domain Profile + Blueprint Compiler routes (no auth required — public API).
 from backend.app.chat_routes import router as _chat_router  # noqa: E402
 from backend.app.domain_routes import router as _domain_router  # noqa: E402
+from backend.app.folder_routes import router as _folder_router  # noqa: E402
 
 app.include_router(_domain_router)
 app.include_router(_chat_router)
+app.include_router(_folder_router)
+
+
+# ---------------------------------------------------------------------------
+# Startup: initialise DB tables when DATABASE_URL is configured
+# ---------------------------------------------------------------------------
+
+
+@app.on_event("startup")
+def _startup_init_db() -> None:
+    db_url = os.environ.get("DATABASE_URL", "").strip()
+    if db_url:
+        try:
+            from backend.app.database import init_db
+
+            init_db()
+            logger.info("Database tables initialised.")
+        except Exception as exc:
+            logger.warning("DB init failed (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------

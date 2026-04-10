@@ -29,6 +29,17 @@ exposes the results over HTTP.
 | `POST` | `/api/domains/{id}/confirm` | Confirm a draft profile (409 if not draft) |
 | `POST` | `/api/blueprints/compile` | Compile blueprint (requires confirmed domain) |
 | `POST` | `/api/chat` | Send a message to the UI Blueprint AI assistant |
+| `POST` | `/v1/folders` | Create a folder (title optional) |
+| `GET`  | `/v1/folders` | List all folders (ordered by created_at desc) |
+| `GET`  | `/v1/folders/{id}` | Get folder + latest job status + artifact list |
+| `DELETE` | `/v1/folders/{id}` | Delete folder (cascade) |
+| `POST` | `/v1/folders/{id}/clip` | Upload clip to folder (creates analyze job) |
+| `GET`  | `/v1/folders/{id}/artifacts/{artifact_id}` | Presigned download URL for artifact |
+| `POST` | `/v1/folders/{id}/messages` | Send a chat message (AI replies, persisted) |
+| `GET`  | `/v1/folders/{id}/messages` | List folder chat history |
+| `POST` | `/v1/folders/{id}/jobs` | Enqueue a job (`analyze` or `blueprint`) |
+| `GET`  | `/v1/folders/{id}/jobs` | List jobs for the folder |
+| `GET`  | `/v1/folders/{id}/jobs/{job_id}` | Get job status |
 
 Auth-required endpoints need `Authorization: Bearer <API_KEY>` header.
 When `API_KEY` is not set, all requests are allowed (dev / open mode).
@@ -184,9 +195,15 @@ To serve over HTTPS, install Nginx + Certbot, configure a proxy_pass to `localho
 | `API_KEY` | *(empty — no auth)* | Bearer token required by auth-required endpoints |
 | `DATA_DIR` | `./data` | Root directory for session files |
 | `BACKEND_DISABLE_JOBS` | `0` | Set to `1` to skip background jobs (tests) |
-| `OPENAI_API_KEY` | *(empty — AI disabled)* | Server-side OpenAI credential — enables AI-backed domain derivation and `/api/chat`. **Never returned to clients.** |
+| `DATABASE_URL` | *(empty — folder API disabled)* | SQLAlchemy URL for Postgres (or SQLite). Required for `/v1/folders` endpoints. |
+| `REDIS_URL` | *(empty — sync fallback)* | Redis / Valkey connection URL for RQ background jobs. When absent, jobs run synchronously. |
+| `R2_ENDPOINT` | *(empty — no object storage)* | Cloudflare R2 endpoint URL |
+| `R2_BUCKET` | *(empty)* | R2 bucket name |
+| `R2_ACCESS_KEY_ID` | *(empty)* | R2 access key ID |
+| `R2_SECRET_ACCESS_KEY` | *(empty)* | R2 secret access key |
+| `OPENAI_API_KEY` | *(empty — folder chat returns 503)* | Server-side OpenAI credential — required for `/v1/folders/{id}/messages` (returns HTTP 503 when absent). Also enables AI-backed domain derivation and `/api/chat`. **Never returned to clients.** |
 | `OPENAI_MODEL_DOMAIN` | `gpt-4.1-mini` | Model used for domain derivation |
-| `OPENAI_MODEL_CHAT` | `gpt-4.1-mini` | Model used for `/api/chat` |
+| `OPENAI_MODEL_CHAT` | `gpt-4.1-mini` | Model used for `/api/chat` and folder chat |
 | `OPENAI_BASE_URL` | `https://api.openai.com` | OpenAI base URL (strip trailing `/v1` if present — added automatically) |
 | `OPENAI_TIMEOUT_SECONDS` | `30` | Request timeout in seconds for OpenAI calls |
 

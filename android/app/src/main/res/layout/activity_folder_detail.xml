@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    tools:context=".FolderDetailActivity">
+
+    <!-- Folder meta info -->
+    <TextView
+        android:id="@+id/tvFolderTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp"
+        tools:text="Folder abc12345" />
+
+    <TextView
+        android:id="@+id/tvFolderStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:layout_marginBottom="4dp"
+        tools:text="Status: pending" />
+
+    <TextView
+        android:id="@+id/tvFolderId"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="11sp"
+        android:alpha="0.6"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="12dp"
+        tools:text="ID: 00000000-…" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOnSurface"
+        android:alpha="0.12"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Jobs section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/label_jobs"
+        android:textStyle="bold"
+        android:textSize="13sp"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvJobs"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:textSize="11sp"
+        android:layout_marginBottom="8dp"
+        tools:text="analyze – queued (0%)" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOnSurface"
+        android:alpha="0.12"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Artifacts section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/label_artifacts"
+        android:textStyle="bold"
+        android:textSize="13sp"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvArtifacts"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:textSize="11sp"
+        android:layout_marginBottom="8dp"
+        tools:text="clip  •  blueprint_json" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?attr/colorOnSurface"
+        android:alpha="0.12"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Chat section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/label_chat"
+        android:textStyle="bold"
+        android:textSize="13sp"
+        android:layout_marginBottom="4dp" />
+
+    <ScrollView
+        android:id="@+id/scrollChat"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginBottom="8dp">
+
+        <TextView
+            android:id="@+id/tvChatLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            tools:text="You: Hello\nAI: Hi!" />
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/etMessage"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/hint_chat_input"
+            android:inputType="textMultiLine"
+            android:maxLines="3"
+            android:layout_marginEnd="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSend"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_send" />
+    </LinearLayout>
+
+</LinearLayout>
