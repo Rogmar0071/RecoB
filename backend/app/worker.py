@@ -206,6 +206,9 @@ def run_analyze(job_id: str) -> None:
         return
 
     folder_id = str(job.folder_id)
+    extract_timeout = int(
+        os.environ.get("ANALYZE_EXTRACT_TIMEOUT_S", _EXTRACTOR_TIMEOUT_SECONDS_DEFAULT)
+    )
     _update_job(job_id, status="running", progress=5)
     _update_folder_status(folder_id, "running")
     _log_event(
@@ -255,9 +258,7 @@ def run_analyze(job_id: str) -> None:
                 [sys.executable, "-m", "ui_blueprint", "extract", clip_path, "-o", analysis_path],
                 capture_output=True,
                 text=True,
-                timeout=int(
-                    os.environ.get("ANALYZE_EXTRACT_TIMEOUT_S", _EXTRACTOR_TIMEOUT_SECONDS_DEFAULT)
-                ),
+                timeout=extract_timeout,
             )
             if result.returncode != 0:
                 # Capture last 1000 characters of stderr for diagnostics.
@@ -347,9 +348,8 @@ def run_analyze(job_id: str) -> None:
             job_id=job_id,
             error_type="timeout",
             error_detail=(
-                f"Extractor subprocess exceeded "
-                f"{int(os.environ.get('ANALYZE_EXTRACT_TIMEOUT_S', _EXTRACTOR_TIMEOUT_SECONDS_DEFAULT))}"  # noqa: E501
-                f"s timeout. Original error: {str(exc)[:1900]}"
+                f"Extractor subprocess exceeded {extract_timeout}s timeout. "
+                f"Original error: {str(exc)[:1900]}"
             ),
         )
 

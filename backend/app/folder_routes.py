@@ -451,6 +451,7 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
         )
 
     folder.status = "queued"
+    folder.updated_at = datetime.now(timezone.utc)
     db.add(folder)
 
     # Create job row.
