@@ -32,6 +32,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Per-folder/project detail screen.
@@ -58,7 +59,17 @@ class FolderDetailActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "FolderDetail-worker") }
     private val clipUploadExecutor = Executors.newSingleThreadExecutor { Thread(it, "ClipUpload-worker") }
 
+    /** Guards against overlapping concurrent folder-load network requests. */
+    private val isFolderLoading = AtomicBoolean(false)
+
     private val watchdogHandler = Handler(Looper.getMainLooper())
+    private val pollHandler = Handler(Looper.getMainLooper())
+    private val pollRunnable = object : Runnable {
+        override fun run() {
+            loadFolder()
+            pollHandler.postDelayed(this, POLL_INTERVAL_MS)
+        }
+    }
     private val recordingCompletionHelper = RecordingCompletionHelper(RECORDING_TIMEOUT_MS)
 
     private var lastClipPath: String? = null
@@ -154,16 +165,21 @@ class FolderDetailActivity : AppCompatActivity() {
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         recoverPendingCaptureState()
+        // Refresh folder state on resume; renderFolder() will restart polling
+        // if there is still an active analyze job.
+        loadFolder()
     }
 
     override fun onPause() {
         super.onPause()
         watchdogHandler.removeCallbacks(recordingWatchdogRunnable)
+        stopPolling()
         unregisterReceiver(captureReceiver)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        stopPolling()
         executor.shutdownNow()
         clipUploadExecutor.shutdownNow()
     }
@@ -238,7 +254,8 @@ class FolderDetailActivity : AppCompatActivity() {
     private fun onCaptureDone(clip: File, recordingDurationMs: Int?) {
         lastClipPath = clip.absolutePath
         lastRecordingDurationMs = recordingDurationMs
-        binding.btnAnalyze.isEnabled = true
+        // Do NOT enable Analyze here — uploadClipFromFile() will auto-queue
+        // an analyze job on the backend, so polling will track progress.
 
         // Save clip to gallery
         when (val result = MediaStoreVideoSaver.saveClipToGallery(applicationContext, clip)) {
@@ -335,11 +352,14 @@ class FolderDetailActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     lastGalleryUri = uri
-                    binding.btnAnalyze.isEnabled = true
+                    // Do NOT enable Analyze — upload already enqueued an analyze
+                    // job on the backend. Polling will reflect progress and re-enable
+                    // the button only after the job finishes.
                     setActionStatus(null)
                     binding.tvFolderStatus.text = getString(R.string.label_folder_status, "queued")
                     Toast.makeText(this, getString(R.string.status_upload_succeeded), Toast.LENGTH_SHORT).show()
                     loadFolder()
+                    startPolling()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -395,6 +415,7 @@ class FolderDetailActivity : AppCompatActivity() {
                     binding.tvFolderStatus.text = getString(R.string.label_folder_status, "queued")
                     Toast.makeText(this, getString(R.string.status_upload_succeeded), Toast.LENGTH_SHORT).show()
                     loadFolder()
+                    startPolling()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -441,6 +462,8 @@ class FolderDetailActivity : AppCompatActivity() {
     // -------------------------------------------------------------------------
 
     private fun onAnalyzeClicked() {
+        // Safety guard: the button should already be disabled when a job is active,
+        // but double-check here to prevent duplicate uploads / duplicate analyze jobs.
         val clipPath = lastClipPath
         val galleryUri = lastGalleryUri
         when {
@@ -468,11 +491,36 @@ class FolderDetailActivity : AppCompatActivity() {
         setActionStatus(null)
     }
 
+    private fun startPolling() {
+        pollHandler.removeCallbacks(pollRunnable)
+        pollHandler.postDelayed(pollRunnable, POLL_INTERVAL_MS)
+    }
+
+    private fun stopPolling() {
+        pollHandler.removeCallbacks(pollRunnable)
+    }
+
+    private fun hasActiveAnalyzeJob(jobs: JSONArray?): Boolean {
+        if (jobs == null) return false
+        for (i in 0 until jobs.length()) {
+            val job = jobs.getJSONObject(i)
+            if (job.optString("type") == "analyze" &&
+                job.optString("status") in ACTIVE_JOB_STATUSES
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
     // -------------------------------------------------------------------------
     // Load folder detail
     // -------------------------------------------------------------------------
 
     private fun loadFolder() {
+        // Skip if a load is already in progress to avoid overlapping requests.
+        if (!isFolderLoading.compareAndSet(false, true)) return
+
         val baseUrl = BuildConfig.BACKEND_BASE_URL.trimEnd('/')
         val apiKey = BuildConfig.BACKEND_API_KEY
 
@@ -488,6 +536,7 @@ class FolderDetailActivity : AppCompatActivity() {
                 response.use { resp ->
                     val bodyStr = resp.body?.string() ?: ""
                     runOnUiThread {
+                        isFolderLoading.set(false)
                         if (resp.isSuccessful) {
                             renderFolder(JSONObject(bodyStr))
                         } else {
@@ -499,6 +548,7 @@ class FolderDetailActivity : AppCompatActivity() {
                 }
             } catch (e: IOException) {
                 runOnUiThread {
+                    isFolderLoading.set(false)
                     binding.tvFolderStatus.text = getString(R.string.folder_load_error)
                 }
             }
@@ -539,6 +589,35 @@ class FolderDetailActivity : AppCompatActivity() {
                     appendLine("• ${a.optString("type")}")
                 }
             }.trim()
+        }
+
+        // Manage Analyze button state and polling based on active analyze jobs.
+        val hasActiveJob = hasActiveAnalyzeJob(jobs)
+        if (hasActiveJob) {
+            // hasActiveJob being true guarantees jobs is non-null and contains an active
+            // analyze job. Use the status of the first matching active job to set the
+            // button label. The backend returns jobs in insertion order (oldest first),
+            // so the active job found first is the earliest still-running one.
+            val activeAnalyzeStatus = (0 until jobs.length())
+                .map { jobs.getJSONObject(it) }
+                .firstOrNull {
+                    it.optString("type") == "analyze" &&
+                        it.optString("status") in ACTIVE_JOB_STATUSES
+                }
+                ?.optString("status") ?: "queued" // unreachable: guaranteed by hasActiveJob
+            binding.btnAnalyze.isEnabled = false
+            binding.btnAnalyze.text = if (activeAnalyzeStatus == "running") {
+                getString(R.string.btn_analyze_running)
+            } else {
+                getString(R.string.btn_analyze_queued)
+            }
+            startPolling()
+        } else {
+            stopPolling()
+            // Re-enable Analyze (for re-run) only when the user has a clip in this session.
+            val hasClip = lastClipPath != null || lastGalleryUri != null
+            binding.btnAnalyze.isEnabled = hasClip
+            binding.btnAnalyze.text = getString(R.string.btn_analyze)
         }
     }
 
@@ -656,6 +735,8 @@ class FolderDetailActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_FOLDER_ID = "folder_id"
         private const val RECORDING_TIMEOUT_MS = 30_000L
+        private const val POLL_INTERVAL_MS = 2_000L
+        private val ACTIVE_JOB_STATUSES = setOf("queued", "running")
         private const val ERROR_PERMISSION_DENIED = "Screen capture permission denied"
         private const val ERROR_START_FAILED = "Capture failed to start recording."
     }
