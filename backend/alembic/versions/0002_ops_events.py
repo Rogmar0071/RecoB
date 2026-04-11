@@ -37,7 +37,7 @@ def upgrade() -> None:
         sa.Column("duration_ms", sa.Integer, nullable=True),
         sa.Column("error_type", sa.Text, nullable=True),
         sa.Column("error_detail", sa.Text, nullable=True),
-        sa.Column("json_details", sa.JSON, nullable=True),
+        sa.Column("details_json", sa.JSON, nullable=True),
     )
 
 
