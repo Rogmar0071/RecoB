@@ -301,6 +301,39 @@ class TestUploadClip:
         )
         assert resp.status_code == 404
 
+    def test_upload_deduped_when_analyze_job_active(self, client, monkeypatch) -> None:
+        """Uploading while an analyze job is queued/running returns existing job + deduped:true."""
+        for k in ("R2_ENDPOINT", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
+            monkeypatch.delenv(k, raising=False)
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        # First upload creates a job.
+        resp1 = client.post(
+            f"/v1/folders/{fid}/clip",
+            files={"clip": ("test.mp4", b"\x00\x01", "video/mp4")},
+            headers=_auth(),
+        )
+        assert resp1.status_code == 202
+        job_id = resp1.json()["job"]["id"]
+        assert resp1.json().get("deduped") is None
+
+        # Second upload while job still queued → deduped.
+        resp2 = client.post(
+            f"/v1/folders/{fid}/clip",
+            files={"clip": ("test.mp4", b"\x00\x02", "video/mp4")},
+            headers=_auth(),
+        )
+        assert resp2.status_code == 202
+        body2 = resp2.json()
+        assert body2["deduped"] is True
+        assert body2["job"]["id"] == job_id
+
+        # Confirm no additional job row was created.
+        jobs_resp = client.get(f"/v1/folders/{fid}/jobs", headers=_auth())
+        assert len(jobs_resp.json()["jobs"]) == 1
+
 
 # ---------------------------------------------------------------------------
 # POST /v1/folders/{id}/messages  — chat
@@ -500,6 +533,40 @@ class TestFolderChat:
         body = resp.json()
         assert "enqueued_job" not in body
 
+    def test_analyze_intent_deduped_when_job_active(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sending analyze intent twice reuses the existing queued job."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        import backend.app.folder_routes as fr
+
+        monkeypatch.setattr(fr, "_call_openai_responses_api", _mock_openai)
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp1 = client.post(
+            f"/v1/folders/{fid}/messages",
+            json={"message": "Please analyze this clip"},
+            headers=_auth(),
+        )
+        assert resp1.status_code == 201
+        job_id1 = resp1.json()["enqueued_job"]["id"]
+
+        resp2 = client.post(
+            f"/v1/folders/{fid}/messages",
+            json={"message": "Please analyze this clip"},
+            headers=_auth(),
+        )
+        assert resp2.status_code == 201
+        job_id2 = resp2.json()["enqueued_job"]["id"]
+
+        # Same job returned, no new job row.
+        assert job_id2 == job_id1
+        jobs_resp = client.get(f"/v1/folders/{fid}/jobs", headers=_auth())
+        analyze_jobs = [j for j in jobs_resp.json()["jobs"] if j["type"] == "analyze"]
+        assert len(analyze_jobs) == 1
+
 
 # ---------------------------------------------------------------------------
 # GET /v1/folders/{id}/messages
@@ -590,6 +657,74 @@ class TestJobs:
     def test_create_job_requires_auth(self, client: TestClient) -> None:
         resp = client.post(f"/v1/folders/{uuid.uuid4()}/jobs", json={"type": "analyze"})
         assert resp.status_code == 401
+
+    def test_analyze_job_deduped_when_queued(self, client: TestClient) -> None:
+        """Second POST /jobs with type=analyze returns the same job + deduped: true."""
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp1 = client.post(
+            f"/v1/folders/{fid}/jobs",
+            json={"type": "analyze"},
+            headers=_auth(),
+        )
+        assert resp1.status_code == 202
+        job1 = resp1.json()["job"]
+        assert job1["status"] == "queued"
+        assert resp1.json().get("deduped") is None  # not deduped on first call
+
+        resp2 = client.post(
+            f"/v1/folders/{fid}/jobs",
+            json={"type": "analyze"},
+            headers=_auth(),
+        )
+        assert resp2.status_code == 202
+        body2 = resp2.json()
+        assert body2["deduped"] is True
+        assert body2["job"]["id"] == job1["id"]  # same job returned
+
+    def test_analyze_job_not_deduped_after_completion(self, client: TestClient) -> None:
+        """A new analyze job is created when previous one has finished."""
+        import backend.app.worker as w
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp1 = client.post(
+            f"/v1/folders/{fid}/jobs",
+            json={"type": "analyze"},
+            headers=_auth(),
+        )
+        job_id = resp1.json()["job"]["id"]
+
+        # Simulate job completing.
+        w._update_job(job_id, status="succeeded")
+
+        resp2 = client.post(
+            f"/v1/folders/{fid}/jobs",
+            json={"type": "analyze"},
+            headers=_auth(),
+        )
+        assert resp2.status_code == 202
+        assert resp2.json().get("deduped") is None
+        assert resp2.json()["job"]["id"] != job_id
+
+    def test_blueprint_job_not_deduped(self, client: TestClient) -> None:
+        """Blueprint jobs are not subject to the analyze dedupe guard."""
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        resp1 = client.post(
+            f"/v1/folders/{fid}/jobs", json={"type": "blueprint"}, headers=_auth()
+        )
+        resp2 = client.post(
+            f"/v1/folders/{fid}/jobs", json={"type": "blueprint"}, headers=_auth()
+        )
+        assert resp1.status_code == 202
+        assert resp2.status_code == 202
+        # Two separate blueprint jobs created.
+        assert resp2.json()["job"]["id"] != resp1.json()["job"]["id"]
+        assert resp2.json().get("deduped") is None
 
 
 # ---------------------------------------------------------------------------

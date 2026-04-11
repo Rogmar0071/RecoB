@@ -178,6 +178,21 @@ def _json_response(model: BaseModel, status_code: int = 200) -> JSONResponse:
     )
 
 
+def _get_active_analyze_job(db, folder_id: uuid.UUID):
+    """Return the most-recent queued/running analyze job for *folder_id*, or None."""
+    from sqlmodel import select
+
+    from backend.app.models import Job
+
+    return db.exec(
+        select(Job)
+        .where(Job.folder_id == folder_id)
+        .where(Job.type == "analyze")
+        .where(Job.status.in_(["queued", "running"]))
+        .order_by(Job.created_at.desc())
+    ).first()
+
+
 # ---------------------------------------------------------------------------
 # POST /v1/folders  — create folder
 # ---------------------------------------------------------------------------
@@ -363,6 +378,19 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
         folder_id=str(fid),
         details_json={"filename": filename},
     )
+
+    # Idempotency guard: if an analyze job is already active, return it.
+    existing_job = _get_active_analyze_job(db, fid)
+    if existing_job:
+        return JSONResponse(
+            content={
+                "folder_id": folder_id,
+                "job": _job_dict(existing_job),
+                "clip_object_key": folder.clip_object_key,
+                "deduped": True,
+            },
+            status_code=202,
+        )
 
     # --- Storage (R2) -------------------------------------------------------
     clip_key: str | None = None
@@ -660,17 +688,33 @@ def post_message(
     if intent in ("analyze", "blueprint"):
         from backend.app import worker
 
-        new_job = Job(folder_id=fid, type=intent)
-        db.add(new_job)
-        db.commit()
-        db.refresh(new_job)
-        rq_id = worker.enqueue_job(str(new_job.id), intent)
-        if rq_id:
-            new_job.rq_job_id = rq_id
+        # Idempotency guard: reuse existing active analyze job.
+        if intent == "analyze":
+            existing_job = _get_active_analyze_job(db, fid)
+            if existing_job:
+                enqueued_job = existing_job
+            else:
+                new_job = Job(folder_id=fid, type=intent)
+                db.add(new_job)
+                db.commit()
+                db.refresh(new_job)
+                rq_id = worker.enqueue_job(str(new_job.id), intent)
+                if rq_id:
+                    new_job.rq_job_id = rq_id
+                    db.commit()
+                    db.refresh(new_job)
+                enqueued_job = new_job
+        else:
+            new_job = Job(folder_id=fid, type=intent)
             db.add(new_job)
             db.commit()
             db.refresh(new_job)
-        enqueued_job = new_job
+            rq_id = worker.enqueue_job(str(new_job.id), intent)
+            if rq_id:
+                new_job.rq_job_id = rq_id
+                db.commit()
+                db.refresh(new_job)
+            enqueued_job = new_job
     # -----------------------------------------------------------------------
 
     # Build folder context (refresh job/artifact lists after possible enqueue).
@@ -763,6 +807,15 @@ def create_job(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) ->
             status_code=400,
             detail="type must be 'analyze' or 'blueprint'",
         )
+
+    # Idempotency guard: if an analyze job is already active, return it.
+    if job_type == "analyze":
+        existing_job = _get_active_analyze_job(db, fid)
+        if existing_job:
+            return JSONResponse(
+                content={"job": _job_dict(existing_job), "deduped": True},
+                status_code=202,
+            )
 
     job = Job(folder_id=fid, type=job_type)
     db.add(job)

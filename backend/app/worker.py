@@ -78,7 +78,12 @@ def enqueue_job(job_id: str, job_type: str) -> Optional[str]:
         fn = _JOB_FUNCTIONS.get(job_type)
         if fn is None:
             raise ValueError(f"Unknown job type: {job_type!r}")
-        rq_job = q.enqueue(fn, job_id)
+        rq_job = q.enqueue(
+            fn,
+            job_id,
+            job_timeout=int(os.environ.get("RQ_JOB_TIMEOUT_S", "1800")),
+            result_ttl=int(os.environ.get("RQ_RESULT_TTL_S", "3600")),
+        )
         return rq_job.id
 
     # No Redis – run synchronously in a thread pool (same behaviour as the
@@ -229,6 +234,8 @@ def run_analyze(job_id: str) -> None:
             job_id=job_id,
         )
 
+        extract_timeout_s = int(os.environ.get("ANALYZE_EXTRACT_TIMEOUT_S", "900"))
+
         with tempfile.TemporaryDirectory() as tmpdir:
             clip_path = os.path.join(tmpdir, "clip.mp4")
             analysis_path = os.path.join(tmpdir, "analysis.json")
@@ -237,14 +244,43 @@ def run_analyze(job_id: str) -> None:
                 fh.write(clip_bytes)
 
             _update_job(job_id, progress=20)
+            _log_event(
+                source="worker",
+                level="info",
+                event_type="jobs.progress",
+                message=f"Job analyze progress 20%: starting extraction for {job_id}",
+                folder_id=folder_id,
+                job_id=job_id,
+            )
 
             # Run extractor — output saved as analysis.json.
-            result = subprocess.run(
-                [sys.executable, "-m", "ui_blueprint", "extract", clip_path, "-o", analysis_path],
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable, "-m", "ui_blueprint", "extract",
+                        clip_path, "-o", analysis_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=extract_timeout_s,
+                )
+            except subprocess.TimeoutExpired:
+                timeout_msg = f"Extraction timed out after {extract_timeout_s}s"
+                logger.warning("run_analyze: extraction timed out for job %s", job_id)
+                _update_job(job_id, status="failed", error=timeout_msg)
+                _update_folder_status(folder_id, "failed")
+                _log_event(
+                    source="worker",
+                    level="error",
+                    event_type="jobs.failed",
+                    message=f"Job analyze timed out: {job_id}",
+                    folder_id=folder_id,
+                    job_id=job_id,
+                    error_type="TimeoutExpired",
+                    error_detail=timeout_msg,
+                )
+                return
+
             if result.returncode != 0:
                 raise RuntimeError(f"Extraction failed: {result.stderr.strip()}")
 

@@ -772,8 +772,8 @@ class FolderDetailActivity : AppCompatActivity() {
         if (hasActiveJob) {
             // hasActiveJob being true guarantees jobs is non-null and contains an active
             // analyze job. Use the status of the first matching active job to set the
-            // button label. The backend returns jobs in insertion order (oldest first),
-            // so the active job found first is the earliest still-running one.
+            // button label. The backend returns jobs newest-first (desc), so the active
+            // job found first is the most-recently created still-running one.
             val activeAnalyzeStatus = (0 until jobs.length())
                 .map { jobs.getJSONObject(it) }
                 .firstOrNull {
