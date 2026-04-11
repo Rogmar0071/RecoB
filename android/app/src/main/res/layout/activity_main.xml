@@ -56,7 +56,7 @@
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_search"
-                android:contentDescription="@string/action_select_all"
+                android:contentDescription="@string/btn_search"
                 android:imageTintList="@color/icon_tint"
                 android:scaleType="center" />
         </LinearLayout>
