@@ -120,8 +120,12 @@ def post_web_search(body: dict[str, Any]) -> JSONResponse:
             recency_days=req.recency_days,
             max_results=req.max_results,
         )
-    except TavilyKeyMissing as exc:
-        return _error(503, "tavily_key_missing", str(exc))
+    except TavilyKeyMissing:
+        return _error(
+            503,
+            "tavily_key_missing",
+            "TAVILY_API_KEY is not configured. Set this environment variable to enable web search.",
+        )
 
     response = WebSearchResponse(
         results=[WebSearchResult(**r) for r in raw.get("results", [])],

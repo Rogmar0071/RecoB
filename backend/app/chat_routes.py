@@ -233,7 +233,7 @@ def _load_recent_history(db: Session | None) -> list[Any]:
 
     history = db.exec(
         select(GlobalChatMessage)
-        .where(GlobalChatMessage.superseded_by_id == None)  # noqa: E711
+        .where(GlobalChatMessage.superseded_by_id.is_(None))
         .order_by(GlobalChatMessage.created_at.desc())
         .limit(_GLOBAL_CHAT_HISTORY_LIMIT)
     ).all()
@@ -344,6 +344,7 @@ def _build_search_query(message: str) -> str:
     """Strip the 'search:' prefix if present and return the query."""
     stripped = message.strip()
     if stripped.lower().startswith(_SEARCH_PREFIX):
+        # Strip prefix using its length to handle case-insensitive match.
         return stripped[len(_SEARCH_PREFIX):].strip()
     return stripped
 
