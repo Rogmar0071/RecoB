@@ -27,8 +27,6 @@ from typing import Any
 
 import httpx
 
-from ui_blueprint.domain.openai_provider import _build_completions_url
-
 logger = logging.getLogger(__name__)
 
 INTENT_PACK_SCHEMA_VERSION = "1"
@@ -36,6 +34,13 @@ INTENT_PACK_SCHEMA_VERSION = "1"
 _DEFAULT_MODEL = "gpt-4.1-mini"
 _DEFAULT_BASE_URL = "https://api.openai.com"
 _DEFAULT_TIMEOUT = 45.0
+
+
+def _build_completions_url(base: str) -> str:
+    base = base.rstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}/chat/completions"
+    return f"{base}/v1/chat/completions"
 
 _SYSTEM_PROMPT = """\
 You are an expert mobile/web UI analyst. You receive structured extraction data from a
