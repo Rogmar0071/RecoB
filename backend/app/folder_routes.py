@@ -1227,9 +1227,15 @@ def get_intent_pack(folder_id: str, db=Depends(_db_session)) -> JSONResponse:
     try:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             tmp_path = tmp.name
-        storage.get_object_to_file(artifact.object_key, tmp_path)
-        with open(tmp_path, "r", encoding="utf-8") as f:
-            intent_pack = json.load(f)
+        try:
+            storage.get_object_to_file(artifact.object_key, tmp_path)
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                intent_pack = json.load(f)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
     except Exception as exc:
         logger.error("Failed to load IntentPack artifact: %s", exc)
         raise HTTPException(status_code=502, detail="Could not load IntentPack") from exc

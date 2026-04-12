@@ -1102,6 +1102,7 @@ def _generate_folder_intent_pack(job_id: str, folder_id: str) -> None:
             # Download and parse each segment JSON
             segments = []
             for artifact in segment_artifacts:
+                tmp_path = None
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
                         tmp_path = tmp.name
@@ -1112,6 +1113,12 @@ def _generate_folder_intent_pack(job_id: str, folder_id: str) -> None:
                 except Exception as seg_exc:
                     logger.warning("Could not load segment artifact %s: %s", artifact.id, seg_exc)
                     continue
+                finally:
+                    if tmp_path is not None:
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
 
             if not segments:
                 return
