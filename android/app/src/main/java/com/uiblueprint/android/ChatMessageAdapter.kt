@@ -34,6 +34,10 @@ class ChatMessageAdapter(
     private val listener: MessageActionListener,
 ) : RecyclerView.Adapter<ChatMessageAdapter.ViewHolder>() {
 
+    companion object {
+        private const val BUBBLE_WIDTH_PERCENTAGE = 0.70
+    }
+
     // -------------------------------------------------------------------------
     // Public data class
     // -------------------------------------------------------------------------
@@ -101,8 +105,13 @@ class ChatMessageAdapter(
         // Role label
         holder.tvRole.text = if (msg.role == "user") "You" else "AI"
 
-        // Align user messages to the right at 70% width
+        // Align user messages to the right at 70% width (set programmatically — XML percentages
+        // are not valid Android dimension values and cause aapt2 build failures)
+        val parentWidth = (holder.itemView.parent as? android.view.View)?.width
+            ?.takeIf { it > 0 }
+            ?: holder.itemView.context.resources.displayMetrics.widthPixels
         val bubbleParams = holder.bubbleContainer.layoutParams as FrameLayout.LayoutParams
+        bubbleParams.width = (parentWidth * BUBBLE_WIDTH_PERCENTAGE).toInt()
         if (msg.role == "user") {
             bubbleParams.gravity = android.view.Gravity.END
             holder.cardMessage.setCardBackgroundColor(

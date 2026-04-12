@@ -20,7 +20,7 @@
     <!-- Message bubble + actions column — positioned by adapter via layout_gravity -->
     <LinearLayout
         android:id="@+id/bubbleContainer"
-        android:layout_width="70%"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
