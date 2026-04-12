@@ -30,14 +30,14 @@
             android:paddingBottom="8dp"
             android:gravity="center_vertical">
 
-            <ImageButton
+            <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnDrawerToggle"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_sort_by_size"
                 android:contentDescription="@string/drawer_open"
-                android:imageTintList="@color/icon_tint"
+                app:tint="@color/icon_tint"
                 android:scaleType="center" />
 
             <TextView
@@ -50,14 +50,14 @@
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
-            <ImageButton
+            <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnSearch"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_search"
                 android:contentDescription="@string/btn_search"
-                android:imageTintList="@color/icon_tint"
+                app:tint="@color/icon_tint"
                 android:scaleType="center" />
         </LinearLayout>
 
@@ -208,15 +208,15 @@
             android:paddingBottom="4dp"
             android:gravity="center_vertical">
 
-            <ImageButton
-                android:id="@+id/btnAttach"
-                android:layout_width="@dimen/icon_btn_size"
-                android:layout_height="@dimen/icon_btn_size"
-                android:background="@drawable/bg_circle_btn"
-                android:src="@android:drawable/ic_input_add"
-                android:imageTintList="@color/icon_tint"
-                android:contentDescription="@string/btn_attach"
-                android:scaleType="center" />
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnAttach"
+            android:layout_width="@dimen/icon_btn_size"
+            android:layout_height="@dimen/icon_btn_size"
+            android:background="@drawable/bg_circle_btn"
+            android:src="@android:drawable/ic_input_add"
+            app:tint="@color/icon_tint"
+            android:contentDescription="@string/btn_attach"
+            android:scaleType="center" />
 
             <EditText
                 android:id="@+id/etMessage"
@@ -231,24 +231,24 @@
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp" />
 
-            <ImageButton
+            <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnMic"
                 android:layout_width="@dimen/icon_btn_size"
                 android:layout_height="@dimen/icon_btn_size"
                 android:background="@drawable/bg_circle_btn"
                 android:src="@android:drawable/ic_btn_speak_now"
-                android:imageTintList="@color/icon_tint"
+                app:tint="@color/icon_tint"
                 android:contentDescription="@string/btn_mic"
                 android:scaleType="center" />
 
-            <ImageButton
+            <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnSend"
                 android:layout_width="@dimen/send_btn_size"
                 android:layout_height="@dimen/send_btn_size"
                 android:layout_marginStart="4dp"
                 android:background="@drawable/bg_send_btn"
                 android:src="@android:drawable/ic_menu_upload"
-                android:imageTintList="@android:color/black"
+                app:tint="@android:color/black"
                 android:contentDescription="@string/btn_send"
                 android:scaleType="center" />
         </LinearLayout>
@@ -283,13 +283,13 @@
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
-            <ImageButton
+            <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnCloseDrawer"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:imageTintList="@color/icon_tint"
+                app:tint="@color/icon_tint"
                 android:contentDescription="@string/drawer_close"
                 android:scaleType="center" />
         </LinearLayout>

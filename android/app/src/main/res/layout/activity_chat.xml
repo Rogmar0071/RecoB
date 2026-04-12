@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -113,13 +114,13 @@
         android:paddingBottom="4dp"
         android:gravity="center_vertical">
 
-        <ImageButton
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnAttach"
             android:layout_width="@dimen/icon_btn_size"
             android:layout_height="@dimen/icon_btn_size"
             android:background="@drawable/bg_circle_btn"
             android:src="@android:drawable/ic_input_add"
-            android:imageTintList="@color/icon_tint"
+            app:tint="@color/icon_tint"
             android:contentDescription="@string/btn_attach"
             android:scaleType="center" />
 
@@ -136,24 +137,24 @@
             android:paddingStart="8dp"
             android:paddingEnd="8dp" />
 
-        <ImageButton
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnMic"
             android:layout_width="@dimen/icon_btn_size"
             android:layout_height="@dimen/icon_btn_size"
             android:background="@drawable/bg_circle_btn"
             android:src="@android:drawable/ic_btn_speak_now"
-            android:imageTintList="@color/icon_tint"
+            app:tint="@color/icon_tint"
             android:contentDescription="@string/btn_mic"
             android:scaleType="center" />
 
-        <ImageButton
+        <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/btnSend"
             android:layout_width="@dimen/send_btn_size"
             android:layout_height="@dimen/send_btn_size"
             android:layout_marginStart="4dp"
             android:background="@drawable/bg_send_btn"
             android:src="@android:drawable/ic_menu_upload"
-            android:imageTintList="@android:color/black"
+            app:tint="@android:color/black"
             android:contentDescription="@string/btn_send"
             android:scaleType="center" />
     </LinearLayout>
