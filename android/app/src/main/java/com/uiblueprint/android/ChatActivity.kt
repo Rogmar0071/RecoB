@@ -406,7 +406,6 @@ class ChatActivity : AppCompatActivity(), ChatMessageAdapter.MessageActionListen
     private fun setupMicButton() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             binding.btnMic.isEnabled = false
-            Toast.makeText(this, getString(R.string.toast_mic_not_supported), Toast.LENGTH_SHORT).show()
             return
         }
         binding.btnMic.setOnClickListener { onMicClicked() }

@@ -209,7 +209,7 @@ class FolderDetailActivity : AppCompatActivity() {
     }
 
     // RECORD_AUDIO permission launcher for voice input (btnMic).
-    private val micVoicePermissionLauncher = registerForActivityResult(
+    private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
@@ -1539,7 +1539,6 @@ class FolderDetailActivity : AppCompatActivity() {
     private fun setupMicButton() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             binding.btnMic.isEnabled = false
-            Toast.makeText(this, getString(R.string.toast_mic_not_supported), Toast.LENGTH_SHORT).show()
             return
         }
         binding.btnMic.setOnClickListener { onMicClicked() }
@@ -1551,7 +1550,7 @@ class FolderDetailActivity : AppCompatActivity() {
         ) {
             startSpeechRecognition()
         } else {
-            micVoicePermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
     }
 
