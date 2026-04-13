@@ -1,4 +1,4 @@
-# ui-blueprint
+# RecoB
 
 > Convert 10-second Android screen-recording clips into a structured "blueprint" suitable for near-human-indistinguishable replay in a custom renderer — and optionally for compiling into automation events.
 
