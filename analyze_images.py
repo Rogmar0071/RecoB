@@ -6,6 +6,8 @@ import argparse
 
 def analyze_image(image_path):
     img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Could not read image: {image_path}")
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # Simple threshold and contour detection to find UI elements
@@ -13,8 +15,8 @@ def analyze_image(image_path):
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     elements = []
-    for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt)
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
         # Filter small regions
         if w * h > 500:
             elements.append({
@@ -39,8 +41,8 @@ def main(input_folder, output_file):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze frames for UI elements")
-    parser.add_argument("--input_folder", required=True, help="Folder with extracted frames")
-    parser.add_argument("--output_file", required=True, help="Output JSON file path")
+    parser.add_argument("--input-folder", required=True, dest="input_folder", help="Folder with extracted frames")
+    parser.add_argument("--output-file", required=True, dest="output_file", help="Output JSON file path")
     args = parser.parse_args()
 
     main(args.input_folder, args.output_file)
