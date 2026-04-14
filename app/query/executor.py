@@ -84,6 +84,8 @@ class StrictEvidenceExecutor:
 
 def _preferred_claim_line(lines: list[str], index: int, fallback: str) -> str:
     if fallback.startswith(("class ", "def ")):
+        if index + 1 >= len(lines):
+            return fallback
         for candidate in lines[index + 1 :]:
             stripped = candidate.strip()
             if not stripped:

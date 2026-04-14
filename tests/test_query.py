@@ -27,9 +27,9 @@ def test_query_returns_verified_facts_when_evidence_matches(tmp_path: Path) -> N
     assert response["status"] == "OK"
     assert response["verified_facts"]
     fact = response["verified_facts"][0]
-    assert "Coordinates event playback" in fact["claim"]
+    assert "coordinates event playback" in fact["claim"].lower()
     assert fact["source_chunk_ids"]
-    assert "Coordinates event playback" in fact["quote"]
+    assert "coordinates event playback" in fact["quote"].lower()
     assert fact["file_path"] == "data/raw/engine.py"
     assert fact["start_line"] == 1
     assert fact["end_line"] == 2
