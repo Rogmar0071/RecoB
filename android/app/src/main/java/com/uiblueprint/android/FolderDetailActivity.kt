@@ -106,8 +106,8 @@ class FolderDetailActivity : AppCompatActivity() {
     private var folderClipObjectKey: String? = null
 
     private val uploadGroupAdapter = UploadGroupAdapter(
-        onOpenClip = { group -> group.clipArtifact?.let { openArtifact(it) } },
-        onRenameClip = { group -> group.clipArtifact?.let { showRenameArtifactDialog(it) } },
+        onOpenUpload = { group -> group.uploadArtifact?.let { openArtifact(it) } },
+        onRenameUpload = { group -> group.uploadArtifact?.let { showRenameArtifactDialog(it) } },
         onOpenArtifact = { artifact -> openArtifact(artifact) },
     )
 
@@ -1101,12 +1101,21 @@ class FolderDetailActivity : AppCompatActivity() {
 
         val jobs = json.optJSONArray("jobs")
         val jobClipKeys = mutableMapOf<String, String>()
+        val jobSourceArtifactIds = mutableMapOf<String, String>()
+        val latestJobByUploadId = mutableMapOf<String, JSONObject>()
         val latestJobByClipKey = mutableMapOf<String, JSONObject>()
         if (jobs != null) {
             for (i in 0 until jobs.length()) {
                 val job = jobs.getJSONObject(i)
                 val jobId = job.optString("id", "")
+                val sourceArtifactId = job.optString("source_artifact_id", "").trim()
                 val clipKey = job.optString("analyze_clip_object_key", "").trim()
+                if (jobId.isNotBlank() && sourceArtifactId.isNotBlank()) {
+                    jobSourceArtifactIds[jobId] = sourceArtifactId
+                    if (!latestJobByUploadId.containsKey(sourceArtifactId)) {
+                        latestJobByUploadId[sourceArtifactId] = job
+                    }
+                }
                 if (jobId.isNotBlank() && clipKey.isNotBlank()) {
                     jobClipKeys[jobId] = clipKey
                     if (!latestJobByClipKey.containsKey(clipKey)) {
@@ -1116,7 +1125,9 @@ class FolderDetailActivity : AppCompatActivity() {
             }
         }
         val artifacts = json.optJSONArray("artifacts")
-        val clipArtifacts = mutableListOf<ArtifactItem>()
+        val allArtifacts = mutableListOf<ArtifactItem>()
+        val uploadArtifacts = mutableListOf<ArtifactItem>()
+        val uploadArtifactIdByObjectKey = mutableMapOf<String, String>()
         val groupedArtifacts = linkedMapOf<String, MutableList<ArtifactItem>>()
         val projectArtifacts = mutableListOf<ArtifactItem>()
         if (artifacts != null) {
@@ -1131,49 +1142,45 @@ class FolderDetailActivity : AppCompatActivity() {
                     jobId = a.optString("job_id", "").takeIf { it.isNotBlank() },
                     createdAt = a.optString("created_at", ""),
                 )
-                if (item.type == "clip") {
-                    clipArtifacts.add(item)
-                    groupedArtifacts.putIfAbsent(item.objectKey, mutableListOf())
-                } else {
-                    val clipKey = item.jobId?.let(jobClipKeys::get)
-                    if (!clipKey.isNullOrBlank()) {
-                        groupedArtifacts.getOrPut(clipKey) { mutableListOf() }.add(item)
-                    } else {
-                        projectArtifacts.add(item)
-                    }
+                allArtifacts.add(item)
+                if (item.type in UPLOAD_ARTIFACT_TYPES) {
+                    uploadArtifacts.add(item)
+                    uploadArtifactIdByObjectKey[item.objectKey] = item.id
+                    groupedArtifacts.putIfAbsent(item.id, mutableListOf())
                 }
             }
         }
+        allArtifacts.forEach { item ->
+            if (item.type in UPLOAD_ARTIFACT_TYPES) return@forEach
+            val sourceArtifactId = item.jobId?.let(jobSourceArtifactIds::get)
+            if (!sourceArtifactId.isNullOrBlank() && groupedArtifacts.containsKey(sourceArtifactId)) {
+                groupedArtifacts.getValue(sourceArtifactId).add(item)
+                return@forEach
+            }
+            val clipKey = item.jobId?.let(jobClipKeys::get)
+            val uploadArtifactId = clipKey?.let(uploadArtifactIdByObjectKey::get)
+            if (!uploadArtifactId.isNullOrBlank() && groupedArtifacts.containsKey(uploadArtifactId)) {
+                groupedArtifacts.getValue(uploadArtifactId).add(item)
+            } else {
+                projectArtifacts.add(item)
+            }
+        }
         val uploadGroups = mutableListOf<UploadGroupItem>()
-        clipArtifacts.forEach { clip ->
-            val linked = groupedArtifacts[clip.objectKey].orEmpty()
+        uploadArtifacts.forEach { upload ->
+            val linked = groupedArtifacts[upload.id].orEmpty()
             uploadGroups.add(
                 UploadGroupItem(
-                    id = clip.id,
-                    title = clip.displayName ?: ArtifactItemAdapter.defaultLabel(clip),
+                    id = upload.id,
+                    title = upload.displayName ?: ArtifactItemAdapter.defaultLabel(upload),
                     subtitle = buildUploadSubtitle(
-                        latestJobByClipKey[clip.objectKey],
+                        latestJobByUploadId[upload.id] ?: latestJobByClipKey[upload.objectKey],
                         linked.size,
-                        clip.createdAt,
+                        upload.createdAt,
                     ),
-                    clipArtifact = clip,
+                    uploadArtifact = upload,
                     relatedArtifacts = linked,
                 ),
             )
-        }
-        val knownClipKeys = clipArtifacts.map { it.objectKey }.toSet()
-        groupedArtifacts.forEach { (clipKey, linked) ->
-            if (clipKey !in knownClipKeys && linked.isNotEmpty()) {
-                uploadGroups.add(
-                    UploadGroupItem(
-                        id = "orphan-$clipKey",
-                        title = clipKey.substringAfterLast('/'),
-                        subtitle = buildUploadSubtitle(latestJobByClipKey[clipKey], linked.size, ""),
-                        clipArtifact = null,
-                        relatedArtifacts = linked,
-                    ),
-                )
-            }
         }
         if (projectArtifacts.isNotEmpty()) {
             uploadGroups.add(
@@ -1181,7 +1188,7 @@ class FolderDetailActivity : AppCompatActivity() {
                     id = "project-files",
                     title = getString(R.string.label_project_files),
                     subtitle = if (projectArtifacts.size == 1) "1 file" else "${projectArtifacts.size} files",
-                    clipArtifact = null,
+                    uploadArtifact = null,
                     relatedArtifacts = projectArtifacts,
                 ),
             )
@@ -1709,6 +1716,7 @@ class FolderDetailActivity : AppCompatActivity() {
         private const val POLL_INTERVAL_MS = 2_000L
         private val ACTIVE_JOB_STATUSES = setOf("queued", "running")
         private val ACTIVE_JOB_TYPES = setOf("analyze", "analyze_optional")
+        private val UPLOAD_ARTIFACT_TYPES = setOf("clip", "audio_m4a", "repo_zip")
         private const val ERROR_PERMISSION_DENIED = "Screen capture permission denied"
         private const val ERROR_START_FAILED = "Capture failed to start recording."
     }

@@ -149,6 +149,7 @@ def _job_dict(job) -> dict[str, Any]:
         "progress": job.progress,
         "error": job.error,
         "rq_job_id": job.rq_job_id,
+        "source_artifact_id": str(job.source_artifact_id) if job.source_artifact_id else None,
         "options": job.analyze_options,
         "analyze_clip_object_key": job.analyze_clip_object_key,
         "created_at": _dt(job.created_at),
@@ -183,6 +184,51 @@ def _json_response(model: BaseModel, status_code: int = 200) -> JSONResponse:
         status_code=status_code,
         content=model.model_dump(mode="json", exclude_none=True),
     )
+
+
+def _next_upload_sequence(db, folder_id: uuid.UUID, artifact_type: str) -> int:
+    from sqlmodel import select
+
+    from backend.app.models import Artifact
+
+    existing = db.exec(
+        select(Artifact).where(Artifact.folder_id == folder_id, Artifact.type == artifact_type)
+    ).all()
+    return len(existing) + 1
+
+
+def _build_upload_identity(
+    db,
+    folder_id: uuid.UUID,
+    artifact_type: str,
+    fallback_extension: str,
+) -> tuple[str, str]:
+    label = {
+        "clip": "Clip",
+        "audio_m4a": "Audio",
+        "repo_zip": "Repository",
+    }.get(artifact_type, "Upload")
+    sequence = _next_upload_sequence(db, folder_id, artifact_type)
+    filename_stem = label.lower().replace(" ", "_")
+    return (
+        f"{label} {sequence}",
+        f"{filename_stem}-{sequence}{fallback_extension}",
+    )
+
+
+def _artifact_for_object_key(db, folder_id: uuid.UUID, object_key: str):
+    from sqlmodel import select
+
+    from backend.app.models import Artifact
+
+    if not object_key:
+        return None
+    return db.exec(
+        select(Artifact)
+        .where(Artifact.folder_id == folder_id)
+        .where(Artifact.object_key == object_key)
+        .order_by(Artifact.created_at.desc())
+    ).first()
 
 
 def _find_active_analyze_job(db, folder_id: uuid.UUID):
@@ -432,7 +478,7 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
     fid = _parse_uuid(folder_id, "folder_id")
     folder = _folder_or_404(db, fid)
 
-    filename = clip.filename or "clip.mp4"
+    original_filename = clip.filename or "clip.mp4"
     content_type = (clip.content_type or "").split(";")[0].strip() or "video/mp4"
 
     # MIME type validation — allow all video/* types plus octet-stream for
@@ -449,11 +495,12 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
         event_type="clip.upload.started",
         message=f"Clip upload started for folder {fid}",
         folder_id=str(fid),
-        details_json={"filename": filename},
+        details_json={"filename": original_filename},
     )
 
     # --- Stream file to a temporary location on disk -------------------------
-    ext = os.path.splitext(filename)[1] or ".mp4"
+    ext = os.path.splitext(original_filename)[1] or ".mp4"
+    display_name, storage_filename = _build_upload_identity(db, fid, "clip", ext)
     tmp_path: str | None = None
     total_bytes = 0
     try:
@@ -489,11 +536,12 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
 
     # --- Storage (R2) -------------------------------------------------------
     clip_key: str | None = None
+    artifact: Artifact | None = None
     try:
         if storage.storage_available():
             try:
                 clip_key = storage.upload_file(
-                    folder_id, filename, tmp_path, content_type
+                    folder_id, storage_filename, tmp_path, content_type
                 )
             except Exception as exc:
                 logger.error("R2 upload failed: %s", exc)
@@ -510,17 +558,11 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
                     status_code=502, detail=f"Storage upload failed: {exc}"
                 ) from exc
 
-            # Persist clip artifact history so each upload keeps its own outputs.
-            from sqlmodel import select
-
-            existing_clips = db.exec(
-                select(Artifact).where(Artifact.folder_id == fid, Artifact.type == "clip")
-            ).all()
             artifact = Artifact(
                 folder_id=fid,
                 type="clip",
                 object_key=clip_key,
-                display_name=f"Clip {len(existing_clips) + 1}",
+                display_name=display_name,
             )
             db.add(artifact)
     finally:
@@ -535,6 +577,9 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
     folder.updated_at = datetime.now(timezone.utc)
     db.add(folder)
     db.commit()
+
+    if artifact is not None:
+        db.refresh(artifact)
 
     # Deduplicate: if an analyze job is already queued/running, return it.
     _mark_stalled_jobs(db, fid)
@@ -566,7 +611,12 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
     db.add(folder)
 
     # Create job row.
-    job = Job(folder_id=fid, type="analyze")
+    job = Job(
+        folder_id=fid,
+        type="analyze",
+        analyze_clip_object_key=clip_key,
+        source_artifact_id=artifact.id if artifact is not None else None,
+    )
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -629,6 +679,7 @@ async def upload_audio(
         raise HTTPException(status_code=502, detail="Storage not configured")
 
     content_type = (audio.content_type or "").split(";")[0].strip() or "audio/mp4"
+    display_name, storage_filename = _build_upload_identity(db, fid, "audio_m4a", ".m4a")
     if not (content_type.startswith("audio/") or content_type == "application/octet-stream"):
         raise HTTPException(
             status_code=415,
@@ -670,7 +721,7 @@ async def upload_audio(
 
     try:
         object_key = storage.upload_file(
-            folder_id, "audio.m4a", tmp_path, "audio/mp4"
+            folder_id, storage_filename, tmp_path, "audio/mp4"
         )
     except Exception as exc:
         logger.error("Audio R2 upload failed: %s", exc)
@@ -691,6 +742,7 @@ async def upload_audio(
         folder_id=fid,
         type="audio_m4a",
         object_key=object_key,
+        display_name=display_name,
     )
     db.add(artifact)
     db.commit()
@@ -760,7 +812,8 @@ async def upload_repo(
                     )
                 tmp.write(chunk)
 
-        key = storage.upload_file(str(fid), "repo.zip", tmp_path, "application/zip")
+        display_name, storage_filename = _build_upload_identity(db, fid, "repo_zip", ".zip")
+        key = storage.upload_file(str(fid), storage_filename, tmp_path, "application/zip")
     finally:
         if tmp_path is not None:
             try:
@@ -768,12 +821,12 @@ async def upload_repo(
             except Exception:  # noqa: BLE001
                 pass
 
-    artifact = Artifact(folder_id=fid, type="repo_zip", object_key=key)
+    artifact = Artifact(folder_id=fid, type="repo_zip", object_key=key, display_name=display_name)
     db.add(artifact)
     db.commit()
     db.refresh(artifact)
 
-    job = Job(folder_id=fid, type="analyze_repo")
+    job = Job(folder_id=fid, type="analyze_repo", source_artifact_id=artifact.id)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -1335,11 +1388,14 @@ def create_job(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) ->
             )
             return JSONResponse(content={"job": _job_dict(existing)}, status_code=202)
 
+    source_artifact = _artifact_for_object_key(db, fid, folder.clip_object_key or "")
+
     job = Job(
         folder_id=fid,
         type=job_type,
         analyze_options=analyze_options,
         analyze_clip_object_key=folder.clip_object_key,
+        source_artifact_id=source_artifact.id if source_artifact is not None else None,
     )
     db.add(job)
     db.commit()

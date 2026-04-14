@@ -15,13 +15,13 @@ data class UploadGroupItem(
     val id: String,
     val title: String,
     val subtitle: String,
-    val clipArtifact: ArtifactItem?,
+    val uploadArtifact: ArtifactItem?,
     val relatedArtifacts: List<ArtifactItem>,
 )
 
 class UploadGroupAdapter(
-    private val onOpenClip: (UploadGroupItem) -> Unit,
-    private val onRenameClip: (UploadGroupItem) -> Unit,
+    private val onOpenUpload: (UploadGroupItem) -> Unit,
+    private val onRenameUpload: (UploadGroupItem) -> Unit,
     private val onOpenArtifact: (ArtifactItem) -> Unit,
 ) : ListAdapter<UploadGroupItem, UploadGroupAdapter.ViewHolder>(DIFF) {
     private val expandedIds = mutableSetOf<String>()
@@ -54,11 +54,11 @@ class UploadGroupAdapter(
         holder.rvArtifacts.adapter = childAdapter
         childAdapter.submitList(item.relatedArtifacts)
 
-        val hasClip = item.clipArtifact != null
-        holder.btnView.visibility = if (hasClip) View.VISIBLE else View.GONE
-        holder.btnRename.visibility = if (hasClip) View.VISIBLE else View.GONE
-        holder.btnView.setOnClickListener { onOpenClip(item) }
-        holder.btnRename.setOnClickListener { onRenameClip(item) }
+        val hasUpload = item.uploadArtifact != null
+        holder.btnView.visibility = if (hasUpload) View.VISIBLE else View.GONE
+        holder.btnRename.visibility = if (hasUpload) View.VISIBLE else View.GONE
+        holder.btnView.setOnClickListener { onOpenUpload(item) }
+        holder.btnRename.setOnClickListener { onRenameUpload(item) }
 
         holder.rvArtifacts.visibility = if (isExpanded && item.relatedArtifacts.isNotEmpty()) View.VISIBLE else View.GONE
         holder.tvEmpty.visibility = if (isExpanded && item.relatedArtifacts.isEmpty()) View.VISIBLE else View.GONE

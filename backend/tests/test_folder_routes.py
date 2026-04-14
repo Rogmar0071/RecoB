@@ -23,6 +23,7 @@ os.environ.setdefault("DATA_DIR", "/tmp/ui_blueprint_test_data")
 from backend.app.main import app  # noqa: E402
 
 TOKEN = "test-secret-key"
+_TINY_ZIP = b"PK\x03\x04repo"
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +301,92 @@ class TestUploadClip:
             headers=_auth(),
         )
         assert resp.status_code == 404
+
+
+class TestUploadAssets:
+    def test_upload_audio_creates_numbered_artifact(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from sqlmodel import Session, select
+
+        import backend.app.database as db_module
+        import backend.app.storage as storage
+        from backend.app.models import Artifact
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        upload_keys = iter(
+            [
+                f"folders/{fid}/audio-1.m4a",
+                f"folders/{fid}/audio-2.m4a",
+            ]
+        )
+        monkeypatch.setattr(storage, "storage_available", lambda: True)
+        monkeypatch.setattr(storage, "upload_file", lambda *args, **kwargs: next(upload_keys))
+
+        for _ in range(2):
+            resp = client.post(
+                f"/v1/folders/{fid}/audio",
+                files={"audio": ("note.m4a", b"\x00\x01", "audio/mp4")},
+                headers=_auth(),
+            )
+            assert resp.status_code == 200, resp.text
+
+        with Session(db_module.get_engine()) as s:
+            rows = s.exec(
+                select(Artifact)
+                .where(Artifact.folder_id == uuid.UUID(fid))
+                .where(Artifact.type == "audio_m4a")
+                .order_by(Artifact.created_at.asc())
+            ).all()
+
+        assert [row.display_name for row in rows] == ["Audio 1", "Audio 2"]
+
+    def test_upload_repo_sets_source_artifact_on_job(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from sqlmodel import Session, select
+
+        import backend.app.database as db_module
+        import backend.app.storage as storage
+        import backend.app.worker as worker
+        from backend.app.models import Artifact, Job
+
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        monkeypatch.setattr(storage, "storage_available", lambda: True)
+        monkeypatch.setattr(
+            storage,
+            "upload_file",
+            lambda *args, **kwargs: f"folders/{fid}/repository-1.zip",
+        )
+        monkeypatch.setattr(worker, "enqueue_job", lambda *args, **kwargs: None)
+
+        resp = client.post(
+            f"/v1/folders/{fid}/repo",
+            files={"repo": ("repo.zip", _TINY_ZIP, "application/zip")},
+            headers=_auth(),
+        )
+        assert resp.status_code == 202, resp.text
+
+        with Session(db_module.get_engine()) as s:
+            artifact = s.exec(
+                select(Artifact)
+                .where(Artifact.folder_id == uuid.UUID(fid))
+                .where(Artifact.type == "repo_zip")
+            ).first()
+            job = s.exec(
+                select(Job)
+                .where(Job.folder_id == uuid.UUID(fid))
+                .where(Job.type == "analyze_repo")
+            ).first()
+
+        assert artifact is not None
+        assert artifact.display_name == "Repository 1"
+        assert job is not None
+        assert job.source_artifact_id == artifact.id
 
 
 # ---------------------------------------------------------------------------
@@ -873,13 +960,21 @@ class TestArtifactRenameAndClipAnchoring:
         from sqlmodel import Session
 
         import backend.app.database as db_module
-        from backend.app.models import Folder
+        from backend.app.models import Artifact, Folder
 
         with Session(db_module.get_engine()) as s:
             row = s.get(Folder, uuid.UUID(fid))
             row.clip_object_key = f"folders/{fid}/clip-1.mp4"
             s.add(row)
+            artifact = Artifact(
+                folder_id=uuid.UUID(fid),
+                type="clip",
+                object_key=row.clip_object_key,
+                display_name="Clip 1",
+            )
+            s.add(artifact)
             s.commit()
+            s.refresh(artifact)
 
         resp = client.post(
             f"/v1/folders/{fid}/jobs",
@@ -888,6 +983,7 @@ class TestArtifactRenameAndClipAnchoring:
         )
         assert resp.status_code == 202, resp.text
         assert resp.json()["job"]["analyze_clip_object_key"] == f"folders/{fid}/clip-1.mp4"
+        assert resp.json()["job"]["source_artifact_id"] == str(artifact.id)
 
     def test_rename_artifact_updates_display_name(self, client: TestClient) -> None:
         folder = _create_folder(client)

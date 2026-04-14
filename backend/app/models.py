@@ -144,6 +144,10 @@ class Job(SQLModel, table=True):
         sa_column=Column(sa.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow),
     )
     rq_job_id: Optional[str] = Field(default=None)
+    source_artifact_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(sa.Uuid, nullable=True, index=True),
+    )
 
     # ---------------------------------------------------------------------------
     # Pipeline v1 checkpoint fields (analyze stage)

@@ -1020,7 +1020,12 @@ def _analyze_aggregate(job_id: str, folder_id: str, job) -> None:
     options = _get_analyze_options(job)
     aa = options.get("additional_analysis", {})
     if aa.get("enabled", False):
-        _enqueue_analyze_optional(folder_id, options, job.analyze_clip_object_key)
+        _enqueue_analyze_optional(
+            folder_id,
+            options,
+            job.analyze_clip_object_key,
+            str(job.source_artifact_id) if job.source_artifact_id else None,
+        )
 
 
 def _generate_folder_intent_pack(job_id: str, folder_id: str) -> None:
@@ -1149,7 +1154,12 @@ def _generate_folder_intent_pack(job_id: str, folder_id: str) -> None:
         )
 
 
-def _enqueue_analyze_optional(folder_id: str, options: dict, clip_object_key: str | None) -> None:
+def _enqueue_analyze_optional(
+    folder_id: str,
+    options: dict,
+    clip_object_key: str | None,
+    source_artifact_id: str | None,
+) -> None:
     """
     Create a new ``analyze_optional`` Job row and enqueue it.
 
@@ -1167,6 +1177,7 @@ def _enqueue_analyze_optional(folder_id: str, options: dict, clip_object_key: st
             type="analyze_optional",
             analyze_options=options,
             analyze_clip_object_key=clip_object_key,
+            source_artifact_id=uuid.UUID(source_artifact_id) if source_artifact_id else None,
         )
         session.add(opt_job)
         session.commit()
@@ -2287,14 +2298,18 @@ def run_analyze_repo_step(job_id: str) -> None:
         from backend.app.database import get_engine
         from backend.app.models import Artifact
 
-        # Find the repo_zip artifact for this folder.
+        # Find the repo_zip artifact for this job's originating upload.
         with Session(get_engine()) as session:
-            artifact = session.exec(
-                select(Artifact)
-                .where(Artifact.folder_id == uuid.UUID(folder_id))
-                .where(Artifact.type == "repo_zip")
-                .order_by(Artifact.created_at.desc())
-            ).first()
+            artifact = None
+            if job.source_artifact_id is not None:
+                artifact = session.get(Artifact, job.source_artifact_id)
+            if artifact is None:
+                artifact = session.exec(
+                    select(Artifact)
+                    .where(Artifact.folder_id == uuid.UUID(folder_id))
+                    .where(Artifact.type == "repo_zip")
+                    .order_by(Artifact.created_at.desc())
+                ).first()
 
         if artifact is None:
             raise RuntimeError("No repo_zip artifact found for folder; upload repo first.")
