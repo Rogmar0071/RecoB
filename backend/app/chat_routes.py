@@ -493,10 +493,14 @@ def _call_openai_chat(
         system_prompt if system_prompt is not None else _CHAT_SYSTEM_PROMPT
     )
     prompt_messages: list[dict[str, str]] = [{"role": "system", "content": effective_prompt}]
-    for item in history or []:
+    total_history = len(history or [])
+    for idx, item in enumerate(history or [], start=1):
         if item.role in ("user", "assistant", "system"):
             content = (
-                format_untrusted_text("Quoted prior user message", item.content)
+                format_untrusted_text(
+                    f"Quoted prior user message ({idx} of {total_history})",
+                    item.content,
+                )
                 if item.role == "user"
                 else item.content
             )

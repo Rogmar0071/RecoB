@@ -998,10 +998,14 @@ def _call_openai_responses_api(
         instructions += f"\n\n--- Current folder state ---\n{folder_context}"
 
     input_messages = []
-    for msg in history:
+    total_history = len(history)
+    for idx, msg in enumerate(history, start=1):
         if msg.role in ("user", "assistant"):
             content = (
-                format_untrusted_text("Quoted prior user message", msg.content)
+                format_untrusted_text(
+                    f"Quoted prior user message ({idx} of {total_history})",
+                    msg.content,
+                )
                 if msg.role == "user"
                 else msg.content
             )
