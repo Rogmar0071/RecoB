@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from app.core.types import EvidenceChunk
 
 
@@ -22,7 +24,7 @@ def build_line_chunks(
 def hydrate_chunks(
     file_path: str,
     raw_chunks: list[tuple[int, int, str]],
-    hasher: callable,
+    hasher: Callable[[str], str],
 ) -> list[EvidenceChunk]:
     hydrated: list[EvidenceChunk] = []
     for start_line, end_line, text in raw_chunks:
