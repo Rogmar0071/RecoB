@@ -26,6 +26,9 @@ def build_prompt(settings: Settings, query: str, chunks: list[RetrievedChunk]) -
     return "\n\n".join(
         [
             system_prompt,
-            query_template.format(query=query, evidence_chunks=serialized_chunks or "<no evidence retrieved>"),
+            query_template.format(
+                query=query,
+                evidence_chunks=serialized_chunks or "<no evidence retrieved>",
+            ),
         ]
     )

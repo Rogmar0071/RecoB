@@ -46,7 +46,12 @@ def search_vector_index(
 ) -> list[RetrievedChunk]:
     query_vector = Counter(tokenize(query))
     scored = [
-        RetrievedChunk(chunk=chunks[chunk_id], score=cosine_score(query_vector, counter), channels=("vector",))
+        RetrievedChunk(
+            chunk=chunks[chunk_id],
+            score=cosine_score(query_vector, counter),
+            channels=("vector",),
+        )
         for chunk_id, counter in index.items()
     ]
-    return [item for item in sorted(scored, key=lambda item: item.score, reverse=True)[:limit] if item.score > 0]
+    ranked = sorted(scored, key=lambda item: item.score, reverse=True)[:limit]
+    return [item for item in ranked if item.score > 0]

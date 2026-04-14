@@ -19,7 +19,10 @@ def test_query_returns_verified_facts_when_evidence_matches(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    response = query_once("What does EventEngine do?", Settings(repo_root=repo_root, chunk_size_lines=10))
+    response = query_once(
+        "What does EventEngine do?",
+        Settings(repo_root=repo_root, chunk_size_lines=10),
+    )
 
     assert response["status"] == "OK"
     assert response["verified_facts"]
@@ -36,7 +39,10 @@ def test_query_returns_unknown_when_no_evidence_matches(tmp_path: Path) -> None:
     (repo_root / "prompts" / "validator.txt").write_text("validator", encoding="utf-8")
     (raw_dir / "notes.txt").write_text("Only deployment notes live here.\n", encoding="utf-8")
 
-    response = query_once("What does EventEngine do?", Settings(repo_root=repo_root, chunk_size_lines=10))
+    response = query_once(
+        "What does EventEngine do?",
+        Settings(repo_root=repo_root, chunk_size_lines=10),
+    )
 
     assert response["status"] == "OK"
     assert response["verified_facts"] == []

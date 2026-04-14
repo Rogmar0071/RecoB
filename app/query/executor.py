@@ -36,7 +36,9 @@ class StrictEvidenceExecutor:
 
         query_terms = [token for token in tokenize(query) if token not in STOPWORDS]
         if not query_terms:
-            return QueryResponse(required_inputs=["Provide a more specific, project-bounded query."])
+            return QueryResponse(
+                required_inputs=["Provide a more specific, project-bounded query."]
+            )
 
         facts: list[tuple[int, VerifiedFact]] = []
         for item in chunks:

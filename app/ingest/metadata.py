@@ -19,7 +19,11 @@ def ingest_project(settings: Settings) -> list[EvidenceChunk]:
     chunks: list[EvidenceChunk] = []
     for path in iter_supported_files(settings):
         relative_path = str(path.relative_to(settings.repo_root))
-        raw_chunks = build_line_chunks(relative_path, read_text_file(path), settings.chunk_size_lines)
+        raw_chunks = build_line_chunks(
+            relative_path,
+            read_text_file(path),
+            settings.chunk_size_lines,
+        )
         chunks.extend(hydrate_chunks(relative_path, raw_chunks, sha256_text))
     write_chunk_manifest(settings.chunk_manifest_path, chunks)
     return chunks

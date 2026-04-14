@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from app.core.types import QueryResponse
 
-
 INSUFFICIENT_EVIDENCE = {
     "status": "INSUFFICIENT EVIDENCE",
     "verified_facts": [],

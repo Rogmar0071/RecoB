@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 
 from app.core.config import Settings
-from app.ingest.metadata import ingest_project
 from app.index.retriever import HybridRetriever
+from app.ingest.metadata import ingest_project
 from app.query.executor import StrictEvidenceExecutor
 from app.query.prompt_builder import build_prompt
 from app.query.response_formatter import INSUFFICIENT_EVIDENCE, format_response
