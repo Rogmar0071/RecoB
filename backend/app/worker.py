@@ -190,54 +190,21 @@ def _create_artifact(
     object_key: str,
     job_id: str | None = None,
 ) -> None:
-    from sqlmodel import Session, select
+    from sqlmodel import Session
 
     from backend.app.database import get_engine
     from backend.app.models import Artifact
 
-    # Aggregate artifact types that should be upserted (one per folder).
-    # Per-segment artifacts (baseline_segment_json, keyframes_segment_json, etc.)
-    # always use INSERT so all records are retained.
-    UPSERT_TYPES = {
-        "analysis_json",
-        "analysis_md",
-        "blueprint_json",
-        "blueprint_md",
-        "segments_manifest_json",
-        "preview_png",
-        "clip",
-    }
-
     job_uuid = uuid.UUID(job_id) if job_id else None
 
     with Session(get_engine()) as session:
-        if artifact_type in UPSERT_TYPES:
-            existing = session.exec(
-                select(Artifact).where(
-                    Artifact.folder_id == uuid.UUID(folder_id),
-                    Artifact.type == artifact_type,
-                )
-            ).first()
-            if existing:
-                existing.object_key = object_key
-                existing.job_id = job_uuid
-                session.add(existing)
-            else:
-                artifact = Artifact(
-                    folder_id=uuid.UUID(folder_id),
-                    type=artifact_type,
-                    object_key=object_key,
-                    job_id=job_uuid,
-                )
-                session.add(artifact)
-        else:
-            artifact = Artifact(
-                folder_id=uuid.UUID(folder_id),
-                type=artifact_type,
-                object_key=object_key,
-                job_id=job_uuid,
-            )
-            session.add(artifact)
+        artifact = Artifact(
+            folder_id=uuid.UUID(folder_id),
+            type=artifact_type,
+            object_key=object_key,
+            job_id=job_uuid,
+        )
+        session.add(artifact)
         session.commit()
 
 
@@ -1199,6 +1166,7 @@ def _enqueue_analyze_optional(folder_id: str, options: dict) -> None:
             folder_id=uuid.UUID(folder_id),
             type="analyze_optional",
             analyze_options=options,
+            analyze_clip_object_key=job.analyze_clip_object_key,
         )
         session.add(opt_job)
         session.commit()

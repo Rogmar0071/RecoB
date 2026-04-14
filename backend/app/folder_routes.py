@@ -150,6 +150,7 @@ def _job_dict(job) -> dict[str, Any]:
         "error": job.error,
         "rq_job_id": job.rq_job_id,
         "options": job.analyze_options,
+        "analyze_clip_object_key": job.analyze_clip_object_key,
         "created_at": _dt(job.created_at),
         "updated_at": _dt(job.updated_at),
     }
@@ -159,8 +160,10 @@ def _artifact_dict(artifact) -> dict[str, Any]:
     return {
         "id": str(artifact.id),
         "folder_id": str(artifact.folder_id),
+        "job_id": str(artifact.job_id) if artifact.job_id else None,
         "type": artifact.type,
         "object_key": artifact.object_key,
+        "display_name": artifact.display_name,
         "created_at": _dt(artifact.created_at),
     }
 
@@ -412,6 +415,7 @@ def patch_folder(
 _MAX_CLIP_BYTES: int = int(os.environ.get("MAX_CLIP_BYTES", 200 * 1024 * 1024))  # 200 MB
 _MAX_AUDIO_BYTES: int = int(os.environ.get("MAX_AUDIO_BYTES", 50 * 1024 * 1024))  # 50 MB
 _UPLOAD_CHUNK_SIZE: int = 64 * 1024  # 64 KB
+_ARTIFACT_DISPLAY_NAME_MAX_LEN: int = 120
 
 
 @router.post("/{folder_id}/clip", status_code=202, dependencies=[Depends(require_auth)])
@@ -506,21 +510,19 @@ async def upload_clip(folder_id: str, clip: UploadFile, db=Depends(_db_session))
                     status_code=502, detail=f"Storage upload failed: {exc}"
                 ) from exc
 
-            # Persist clip artifact (upsert — one clip artifact per folder).
+            # Persist clip artifact history so each upload keeps its own outputs.
             from sqlmodel import select
-            existing_clip = db.exec(
+
+            existing_clips = db.exec(
                 select(Artifact).where(Artifact.folder_id == fid, Artifact.type == "clip")
-            ).first()
-            if existing_clip is not None:
-                existing_clip.object_key = clip_key
-                db.add(existing_clip)
-            else:
-                artifact = Artifact(
-                    folder_id=fid,
-                    type="clip",
-                    object_key=clip_key,
-                )
-                db.add(artifact)
+            ).all()
+            artifact = Artifact(
+                folder_id=fid,
+                type="clip",
+                object_key=clip_key,
+                display_name=f"Clip {len(existing_clips) + 1}",
+            )
+            db.add(artifact)
     finally:
         if tmp_path is not None:
             try:
@@ -732,7 +734,7 @@ async def upload_repo(
     from backend.app.models import Artifact, Job
 
     fid = _parse_uuid(folder_id, "folder_id")
-    _folder_or_404(db, fid)
+    folder = _folder_or_404(db, fid)
 
     if not storage.storage_available():
         raise HTTPException(status_code=502, detail="Storage not configured")
@@ -1333,7 +1335,12 @@ def create_job(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) ->
             )
             return JSONResponse(content={"job": _job_dict(existing)}, status_code=202)
 
-    job = Job(folder_id=fid, type=job_type, analyze_options=analyze_options)
+    job = Job(
+        folder_id=fid,
+        type=job_type,
+        analyze_options=analyze_options,
+        analyze_clip_object_key=folder.clip_object_key,
+    )
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -1357,6 +1364,50 @@ def create_job(folder_id: str, body: dict[str, Any], db=Depends(_db_session)) ->
         details_json={"job_type": job_type, "options": analyze_options},
     )
     return JSONResponse(content={"job": _job_dict(job)}, status_code=202)
+
+
+@router.patch("/{folder_id}/artifacts/{artifact_id}", dependencies=[Depends(require_auth)])
+def rename_artifact(
+    folder_id: str,
+    artifact_id: str,
+    body: dict[str, Any] | None = None,
+    db=Depends(_db_session),
+) -> JSONResponse:
+    """Rename an artifact by updating its display_name."""
+    from backend.app.models import Artifact
+
+    fid = _parse_uuid(folder_id, "folder_id")
+    aid = _parse_uuid(artifact_id, "artifact_id")
+    _folder_or_404(db, fid)
+
+    artifact = db.get(Artifact, aid)
+    if artifact is None or artifact.folder_id != fid:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    raw_name = str((body or {}).get("display_name", "")).strip()
+    if not raw_name:
+        raise HTTPException(status_code=422, detail="display_name must not be blank")
+    if len(raw_name) > _ARTIFACT_DISPLAY_NAME_MAX_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"display_name must not exceed {_ARTIFACT_DISPLAY_NAME_MAX_LEN} characters",
+        )
+
+    artifact.display_name = raw_name
+    db.add(artifact)
+    db.commit()
+    db.refresh(artifact)
+
+    log_event(
+        source="backend",
+        level="info",
+        event_type="artifacts.rename",
+        message=f"Artifact renamed: {artifact.id}",
+        folder_id=str(fid),
+        artifact_id=str(artifact.id),
+        details_json={"display_name": raw_name, "type": artifact.type},
+    )
+    return JSONResponse(content=_artifact_dict(artifact))
 
 
 # ---------------------------------------------------------------------------

@@ -22,7 +22,6 @@ import android.view.View
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -31,7 +30,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.uiblueprint.android.databinding.ActivityFolderDetailBinding
 import okhttp3.MediaType.Companion.toMediaType
@@ -56,8 +54,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - Folder title, status, and UUID
  *  - Action buttons: Record clip, Pick from gallery, Analyze
  *    (clips are automatically associated with this project/folder)
- *  - Jobs list (type + status + progress)
- *  - Artifacts list (type)
+ *  - Upload-centered file detail list with expandable produced files
  *  - Per-folder chat (GET/POST /v1/folders/{id}/messages)
  *
  * Requires [EXTRA_FOLDER_ID] to be set in the launching Intent.
@@ -108,24 +105,11 @@ class FolderDetailActivity : AppCompatActivity() {
     /** clip_object_key from the last successful loadFolder() response. */
     private var folderClipObjectKey: String? = null
 
-    // Adapters for expandable sections
-    private val jobAdapter = JobItemAdapter()
-    private val artifactAdapter = ArtifactItemAdapter { artifact ->
-        ArtifactViewerRouter.open(this, JSONObject().apply {
-            put("id", artifact.id)
-            put("type", artifact.type)
-            put("object_key", artifact.objectKey)
-            artifact.url?.let { put("url", it) }
-        }, folderId)
-    }
-    private val supportingDataAdapter = ArtifactItemAdapter { artifact ->
-        ArtifactViewerRouter.open(this, JSONObject().apply {
-            put("id", artifact.id)
-            put("type", artifact.type)
-            put("object_key", artifact.objectKey)
-            artifact.url?.let { put("url", it) }
-        }, folderId)
-    }
+    private val uploadGroupAdapter = UploadGroupAdapter(
+        onOpenClip = { group -> group.clipArtifact?.let { openArtifact(it) } },
+        onRenameClip = { group -> group.clipArtifact?.let { showRenameArtifactDialog(it) } },
+        onOpenArtifact = { artifact -> openArtifact(artifact) },
+    )
 
     // Chat adapter for per-folder chat (edit hidden; copy/share work same as MainActivity)
     private val chatMessages = mutableListOf<ChatMessageAdapter.Message>()
@@ -334,23 +318,14 @@ class FolderDetailActivity : AppCompatActivity() {
         binding.tvFolderStatus.text = getString(R.string.folder_loading)
         binding.tvFolderId.text = getString(R.string.label_folder_id, folderId)
 
-        // Set up expandable sections
-        binding.rvJobs.layoutManager = LinearLayoutManager(this)
-        binding.rvJobs.adapter = jobAdapter
-        binding.rvArtifacts.layoutManager = LinearLayoutManager(this)
-        binding.rvArtifacts.adapter = artifactAdapter
-        binding.rvSupportingData.layoutManager = LinearLayoutManager(this)
-        binding.rvSupportingData.adapter = supportingDataAdapter
+        binding.rvUploadGroups.layoutManager = LinearLayoutManager(this)
+        binding.rvUploadGroups.adapter = uploadGroupAdapter
 
         // Set up folder chat RecyclerView
         binding.rvFolderChatMessages.layoutManager = LinearLayoutManager(this).apply {
             stackFromEnd = true
         }
         binding.rvFolderChatMessages.adapter = chatAdapter
-
-        toggleSection(binding.headerJobs, binding.rvJobs, binding.ivJobsChevron)
-        toggleSection(binding.headerArtifacts, binding.rvArtifacts, binding.ivArtifactsChevron)
-        toggleSection(binding.headerSupportingData, binding.rvSupportingData, binding.ivSupportingDataChevron)
 
         loadFolder()
         loadMessages()
@@ -459,6 +434,58 @@ class FolderDetailActivity : AppCompatActivity() {
             .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("$baseUrl/v1/folders/$folderId")
+            .patch(body)
+            .apply { if (apiKey.isNotEmpty()) addHeader("Authorization", "Bearer $apiKey") }
+            .build()
+
+        executor.execute {
+            try {
+                BackendClient.executeWithRetry(request).use { resp ->
+                    runOnUiThread {
+                        if (resp.isSuccessful) {
+                            loadFolder()
+                        } else {
+                            Toast.makeText(this, getString(R.string.error_rename_failed), Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (_: IOException) {
+                runOnUiThread {
+                    Toast.makeText(this, getString(R.string.error_rename_failed), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun showRenameArtifactDialog(artifact: ArtifactItem) {
+        val currentName = artifact.displayName ?: ArtifactItemAdapter.defaultLabel(artifact)
+        val editText = EditText(this).apply {
+            hint = currentName
+            setText(currentName)
+            selectAll()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_rename_file_title))
+            .setView(editText)
+            .setPositiveButton(getString(R.string.dialog_btn_rename)) { _, _ ->
+                val newName = editText.text.toString().trim()
+                if (newName.isBlank()) {
+                    Toast.makeText(this, getString(R.string.error_title_empty), Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                callRenameArtifact(artifact.id, newName)
+            }
+            .setNegativeButton(getString(R.string.dialog_btn_cancel), null)
+            .show()
+    }
+
+    private fun callRenameArtifact(artifactId: String, displayName: String) {
+        val baseUrl = BuildConfig.BACKEND_BASE_URL.trimEnd('/')
+        val apiKey = BuildConfig.BACKEND_API_KEY
+        val body = JSONObject().put("display_name", displayName).toString()
+            .toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("$baseUrl/v1/folders/$folderId/artifacts/$artifactId")
             .patch(body)
             .apply { if (apiKey.isNotEmpty()) addHeader("Authorization", "Bearer $apiKey") }
             .build()
@@ -978,6 +1005,15 @@ class FolderDetailActivity : AppCompatActivity() {
         pollHandler.removeCallbacks(pollRunnable)
     }
 
+    private fun openArtifact(artifact: ArtifactItem) {
+        ArtifactViewerRouter.open(this, JSONObject().apply {
+            put("id", artifact.id)
+            put("type", artifact.type)
+            put("object_key", artifact.objectKey)
+            artifact.url?.let { put("url", it) }
+        }, folderId)
+    }
+
     private fun hasActiveAnalyzeJob(jobs: JSONArray?): Boolean {
         if (jobs == null) return false
         for (i in 0 until jobs.length()) {
@@ -989,6 +1025,18 @@ class FolderDetailActivity : AppCompatActivity() {
             }
         }
         return false
+    }
+
+    private fun buildUploadSubtitle(job: JSONObject?, artifactCount: Int, createdAt: String): String {
+        val parts = mutableListOf<String>()
+        if (job != null) {
+            parts += "${job.optString("type", "job")} ${job.optString("status", "queued")}"
+        } else {
+            parts += "uploaded"
+        }
+        parts += "$artifactCount files"
+        createdAt.substringBefore("T").takeIf { it.isNotBlank() }?.let(parts::add)
+        return parts.joinToString(" • ")
     }
 
     // -------------------------------------------------------------------------
@@ -1051,30 +1099,26 @@ class FolderDetailActivity : AppCompatActivity() {
             folderClipObjectKey = serverClipKey
         }
 
-        // Jobs
         val jobs = json.optJSONArray("jobs")
-        val jobList = mutableListOf<JobItem>()
+        val jobClipKeys = mutableMapOf<String, String>()
+        val latestJobByClipKey = mutableMapOf<String, JSONObject>()
         if (jobs != null) {
             for (i in 0 until jobs.length()) {
                 val job = jobs.getJSONObject(i)
-                jobList.add(
-                    JobItem(
-                        id = job.optString("id", i.toString()),
-                        type = job.optString("type", "?"),
-                        status = job.optString("status", "?"),
-                        progress = job.optInt("progress", 0),
-                        createdAt = job.optString("created_at", ""),
-                    )
-                )
+                val jobId = job.optString("id", "")
+                val clipKey = job.optString("analyze_clip_object_key", "").trim()
+                if (jobId.isNotBlank() && clipKey.isNotBlank()) {
+                    jobClipKeys[jobId] = clipKey
+                    if (!latestJobByClipKey.containsKey(clipKey)) {
+                        latestJobByClipKey[clipKey] = job
+                    }
+                }
             }
         }
-        jobAdapter.submitList(jobList)
-        binding.tvJobsCount.text = "${jobList.size}"
-
-        // Artifacts – split into main and supporting
         val artifacts = json.optJSONArray("artifacts")
-        val mainArtifacts = mutableListOf<ArtifactItem>()
-        val supportingArtifacts = mutableListOf<ArtifactItem>()
+        val clipArtifacts = mutableListOf<ArtifactItem>()
+        val groupedArtifacts = linkedMapOf<String, MutableList<ArtifactItem>>()
+        val projectArtifacts = mutableListOf<ArtifactItem>()
         if (artifacts != null) {
             for (i in 0 until artifacts.length()) {
                 val a = artifacts.getJSONObject(i)
@@ -1083,21 +1127,66 @@ class FolderDetailActivity : AppCompatActivity() {
                     type = a.optString("type", "?"),
                     objectKey = a.optString("object_key", ""),
                     url = a.optString("url", "").takeIf { it.isNotBlank() },
+                    displayName = a.optString("display_name", "").takeIf { it.isNotBlank() },
+                    jobId = a.optString("job_id", "").takeIf { it.isNotBlank() },
+                    createdAt = a.optString("created_at", ""),
                 )
-                val t = item.type
-                if (t.contains("segment") || t.contains("manifest") ||
-                    t.contains("baseline") || t.contains("supporting")
-                ) {
-                    supportingArtifacts.add(item)
+                if (item.type == "clip") {
+                    clipArtifacts.add(item)
+                    groupedArtifacts.putIfAbsent(item.objectKey, mutableListOf())
                 } else {
-                    mainArtifacts.add(item)
+                    val clipKey = item.jobId?.let(jobClipKeys::get)
+                    if (!clipKey.isNullOrBlank()) {
+                        groupedArtifacts.getOrPut(clipKey) { mutableListOf() }.add(item)
+                    } else {
+                        projectArtifacts.add(item)
+                    }
                 }
             }
         }
-        artifactAdapter.submitList(mainArtifacts)
-        supportingDataAdapter.submitList(supportingArtifacts)
-        binding.tvArtifactsCount.text = "${mainArtifacts.size}"
-        binding.tvSupportingDataCount.text = "${supportingArtifacts.size}"
+        val uploadGroups = mutableListOf<UploadGroupItem>()
+        clipArtifacts.forEach { clip ->
+            val linked = groupedArtifacts[clip.objectKey].orEmpty()
+            uploadGroups.add(
+                UploadGroupItem(
+                    id = clip.id,
+                    title = clip.displayName ?: ArtifactItemAdapter.defaultLabel(clip),
+                    subtitle = buildUploadSubtitle(
+                        latestJobByClipKey[clip.objectKey],
+                        linked.size,
+                        clip.createdAt,
+                    ),
+                    clipArtifact = clip,
+                    relatedArtifacts = linked,
+                ),
+            )
+        }
+        val knownClipKeys = clipArtifacts.map { it.objectKey }.toSet()
+        groupedArtifacts.forEach { (clipKey, linked) ->
+            if (clipKey !in knownClipKeys && linked.isNotEmpty()) {
+                uploadGroups.add(
+                    UploadGroupItem(
+                        id = "orphan-$clipKey",
+                        title = clipKey.substringAfterLast('/'),
+                        subtitle = buildUploadSubtitle(latestJobByClipKey[clipKey], linked.size, ""),
+                        clipArtifact = null,
+                        relatedArtifacts = linked,
+                    ),
+                )
+            }
+        }
+        if (projectArtifacts.isNotEmpty()) {
+            uploadGroups.add(
+                UploadGroupItem(
+                    id = "project-files",
+                    title = getString(R.string.label_project_files),
+                    subtitle = "${projectArtifacts.size} files",
+                    clipArtifact = null,
+                    relatedArtifacts = projectArtifacts,
+                ),
+            )
+        }
+        uploadGroupAdapter.submitList(uploadGroups)
 
         // Manage Analyze button state and polling based on active analyze jobs.
         val hasActiveJob = hasActiveAnalyzeJob(jobs)
@@ -1256,22 +1345,6 @@ class FolderDetailActivity : AppCompatActivity() {
             val count = chatAdapter.itemCount
             if (count > 0) {
                 binding.rvFolderChatMessages.scrollToPosition(count - 1)
-            }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Expandable section toggle
-    // -------------------------------------------------------------------------
-
-    private fun toggleSection(header: View, rv: RecyclerView, chevron: ImageView) {
-        header.setOnClickListener {
-            if (rv.visibility == View.VISIBLE) {
-                rv.visibility = View.GONE
-                chevron.rotation = -90f
-            } else {
-                rv.visibility = View.VISIBLE
-                chevron.rotation = 0f
             }
         }
     }

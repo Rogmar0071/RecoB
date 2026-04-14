@@ -650,7 +650,12 @@ def _create_job(client: TestClient, folder_id: str, job_type: str = "analyze") -
     return resp.json()["job"]
 
 
-def _seed_artifact(folder_id: str, job_id: str, artifact_type: str = "analysis_json") -> str:
+def _seed_artifact(
+    folder_id: str,
+    job_id: str | None,
+    artifact_type: str = "analysis_json",
+    display_name: str | None = None,
+) -> str:
     """Insert an Artifact row directly into the DB and return its id."""
     import uuid as _uuid
 
@@ -661,9 +666,10 @@ def _seed_artifact(folder_id: str, job_id: str, artifact_type: str = "analysis_j
 
     artifact = Artifact(
         folder_id=_uuid.UUID(folder_id),
-        job_id=_uuid.UUID(job_id),
+        job_id=_uuid.UUID(job_id) if job_id else None,
         type=artifact_type,
         object_key=f"folders/{folder_id}/{artifact_type}.json",
+        display_name=display_name,
     )
     with Session(db_module.get_engine()) as session:
         session.add(artifact)
@@ -857,6 +863,50 @@ class TestDeleteJob:
 
         resp = client.delete(f"/v1/folders/{fid}/jobs/{jid1}", headers=_auth())
         assert resp.json()["folder_status"] == "done"
+
+
+class TestArtifactRenameAndClipAnchoring:
+    def test_create_job_returns_current_clip_anchor(self, client: TestClient) -> None:
+        folder = _create_folder(client)
+        fid = folder["id"]
+
+        from sqlmodel import Session
+
+        import backend.app.database as db_module
+        from backend.app.models import Folder
+
+        with Session(db_module.get_engine()) as s:
+            row = s.get(Folder, uuid.UUID(fid))
+            row.clip_object_key = f"folders/{fid}/clip-1.mp4"
+            s.add(row)
+            s.commit()
+
+        resp = client.post(
+            f"/v1/folders/{fid}/jobs",
+            json={"type": "blueprint"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 202, resp.text
+        assert resp.json()["job"]["analyze_clip_object_key"] == f"folders/{fid}/clip-1.mp4"
+
+    def test_rename_artifact_updates_display_name(self, client: TestClient) -> None:
+        folder = _create_folder(client)
+        fid = folder["id"]
+        artifact_id = _seed_artifact(fid, None, "clip", display_name="Clip 1")
+
+        resp = client.patch(
+            f"/v1/folders/{fid}/artifacts/{artifact_id}",
+            json={"display_name": "Intro clip"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["display_name"] == "Intro clip"
+
+        folder_resp = client.get(f"/v1/folders/{fid}", headers=_auth())
+        artifacts = folder_resp.json()["artifacts"]
+        renamed = next(a for a in artifacts if a["id"] == artifact_id)
+        assert renamed["display_name"] == "Intro clip"
 
     # ------------------------------------------------------------------
     # Error cases
