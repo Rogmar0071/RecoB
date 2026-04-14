@@ -570,13 +570,16 @@ class TestOpenAIProvider:
                 {
                     "message": {
                         "content": (
-                            '{"candidates":[{"name":"Safe Domain","capture_protocol":'
-                            '[{"step_id":"s1","title":"Step 1","instructions":"Do it","required":true},'
-                            '{"step_id":"s2","title":"Step 2","instructions":"Do it again","required":true}],'
+                            '{"candidates":[{"name":"Safe Domain",'
+                            '"capture_protocol":['
+                            '{"step_id":"s1","title":"Step 1","instructions":"Do it",'
+                            '"required":true},'
+                            '{"step_id":"s2","title":"Step 2","instructions":"Do it again",'
+                            '"required":true}],'
                             '"validators":[{"id":"v1","type":"generic","params":{}}],'
                             '"exporters":[{"id":"e1","type":"generic","params":{}}],'
                             '"notes":"ok","confidence":0.9}]}'
-                        )
+                        ),
                     }
                 }
             ]
