@@ -409,7 +409,9 @@ class TestUploadAssets:
 
         monkeypatch.setattr(storage, "storage_available", lambda: True)
 
-        def _capture_upload(folder_id: str, filename: str, local_path: str, content_type: str) -> str:
+        def _capture_upload(
+            folder_id: str, filename: str, local_path: str, content_type: str
+        ) -> str:
             with open(local_path, "rb") as handle:
                 uploaded_payloads.append(handle.read())
             return f"folders/{folder_id}/{filename}"

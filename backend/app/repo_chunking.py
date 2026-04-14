@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -22,25 +23,29 @@ def default_chunk_size_bytes() -> int:
     return max(1, value)
 
 
-def _chunks_dir(upload_id: str) -> Path:
-    """Return the safe on-disk chunk directory for *upload_id*."""
+def _validated_upload_id(upload_id: str) -> str:
     try:
-        uuid.UUID(upload_id)
+        return str(uuid.UUID(upload_id))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid upload_id") from None
 
+
+def _chunks_dir(upload_id: str, *, create: bool = True) -> Path:
+    """Return the safe on-disk chunk directory for *upload_id*."""
+    safe_upload_id = _validated_upload_id(upload_id)
     chunks_root = (_UPLOADS_ROOT / "chunks").resolve()
-    candidate = (chunks_root / upload_id).resolve()
+    candidate = (chunks_root / safe_upload_id).resolve()
     try:
         candidate.relative_to(chunks_root)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid upload_id") from None
-    candidate.mkdir(parents=True, exist_ok=True)
+    if create:
+        candidate.mkdir(parents=True, exist_ok=True)
     return candidate
 
 
 def _manifest_path(upload_id: str) -> Path:
-    return _chunks_dir(upload_id) / "_meta.json"
+    return _chunks_dir(upload_id, create=False) / "_meta.json"
 
 
 def load_manifest(upload_id: str) -> dict[str, Any]:
@@ -54,6 +59,7 @@ def load_manifest(upload_id: str) -> dict[str, Any]:
 
 def _write_manifest(upload_id: str, manifest: dict[str, Any]) -> None:
     manifest_path = _manifest_path(upload_id)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with manifest_path.open("w", encoding="utf-8") as handle:
         json.dump(manifest, handle, sort_keys=True)
 
@@ -95,7 +101,7 @@ def write_chunk(
     if chunk_size_bytes < 1:
         raise HTTPException(status_code=400, detail="Invalid chunk_size_bytes")
 
-    chunk_dir = _chunks_dir(upload_id)
+    chunk_dir = _chunks_dir(upload_id, create=True)
     manifest_path = chunk_dir / "_meta.json"
     manifest = (
         load_manifest(upload_id)
@@ -141,10 +147,10 @@ def write_chunk(
     }
 
 
-def merge_chunks(upload_id: str, destination_path: str, max_bytes: int) -> dict[str, Any]:
+def merge_chunks(upload_id: str, max_bytes: int) -> tuple[dict[str, Any], str]:
     """Merge all uploaded chunks back into a single ZIP file on disk."""
     manifest = load_manifest(upload_id)
-    chunk_dir = _chunks_dir(upload_id)
+    chunk_dir = _chunks_dir(upload_id, create=False)
     total_chunks = int(manifest["total_chunks"])
 
     missing = [
@@ -157,12 +163,21 @@ def merge_chunks(upload_id: str, destination_path: str, max_bytes: int) -> dict[
         )
 
     total_written = 0
-    destination = Path(destination_path)
+    assembled_root = (_UPLOADS_ROOT / "assembled").resolve()
+    assembled_root.mkdir(parents=True, exist_ok=True)
+    current_chunk_path: Path | None = None
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{_validated_upload_id(upload_id)}-",
+        suffix=".zip",
+        dir=assembled_root,
+        delete=False,
+    ) as temporary_file:
+        destination = Path(temporary_file.name)
     try:
         with destination.open("wb") as output_handle:
             for index in range(total_chunks):
-                chunk_path = chunk_dir / f"chunk_{index:05d}"
-                chunk_bytes = chunk_path.read_bytes()
+                current_chunk_path = chunk_dir / f"chunk_{index:05d}"
+                chunk_bytes = current_chunk_path.read_bytes()
                 total_written += len(chunk_bytes)
                 if total_written > max_bytes:
                     raise HTTPException(
@@ -178,14 +193,19 @@ def merge_chunks(upload_id: str, destination_path: str, max_bytes: int) -> dict[
         raise
     except Exception as exc:  # noqa: BLE001
         destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail="Failed to assemble repo ZIP chunks") from exc
+        detail = "Failed to assemble repo ZIP chunks"
+        if current_chunk_path is not None:
+            detail = f"{detail} at {current_chunk_path.name}"
+        raise HTTPException(status_code=500, detail=detail) from exc
 
-    return manifest
+    return manifest, str(destination)
 
 
 def cleanup(upload_id: str) -> None:
     """Delete all persisted chunk files for *upload_id*."""
-    chunk_dir = _chunks_dir(upload_id)
+    chunk_dir = _chunks_dir(upload_id, create=False)
+    if not chunk_dir.exists():
+        return
     for child in chunk_dir.iterdir():
         child.unlink(missing_ok=True)
     chunk_dir.rmdir()

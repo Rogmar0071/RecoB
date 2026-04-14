@@ -1755,7 +1755,7 @@ class FolderDetailActivity : AppCompatActivity() {
                     .setType(MultipartBody.FORM)
                     .addFormDataPart(
                         "chunk",
-                        "${fileName}_part_${chunk.index + 1}",
+                        "chunk_${String.format("%05d", chunk.index)}",
                         chunk.bytes.toRequestBody("application/octet-stream".toMediaType()),
                     )
                     .build()

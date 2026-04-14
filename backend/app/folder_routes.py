@@ -236,13 +236,19 @@ def _artifact_for_object_key(db, folder_id: uuid.UUID, object_key: str):
 
 
 def _persist_repo_upload(db, folder_id: uuid.UUID, local_path: str):
+    """Upload a repo ZIP file, create its artifact row, and enqueue analyze_repo."""
     from backend.app import storage, worker
     from backend.app.models import Artifact, Job
 
     display_name, storage_filename = _build_upload_identity(db, folder_id, "repo_zip", ".zip")
     key = storage.upload_file(str(folder_id), storage_filename, local_path, "application/zip")
 
-    artifact = Artifact(folder_id=folder_id, type="repo_zip", object_key=key, display_name=display_name)
+    artifact = Artifact(
+        folder_id=folder_id,
+        type="repo_zip",
+        object_key=key,
+        display_name=display_name,
+    )
     db.add(artifact)
     db.commit()
     db.refresh(artifact)
@@ -977,7 +983,7 @@ async def finalize_repo_chunk_upload(
     try:
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp_path = tmp.name
-        manifest = repo_chunking.merge_chunks(upload_id, tmp_path, max_repo_zip_bytes)
+        manifest, tmp_path = repo_chunking.merge_chunks(upload_id, max_repo_zip_bytes)
         artifact, job, key = _persist_repo_upload(db, fid, tmp_path)
     finally:
         if tmp_path is not None:
