@@ -416,6 +416,7 @@ def get_folder(folder_id: str, db=Depends(_db_session)) -> JSONResponse:
 @router.delete("/{folder_id}", status_code=204, dependencies=[Depends(require_auth)])
 def delete_folder(folder_id: str, db=Depends(_db_session)) -> None:
     """Delete folder and all cascade-linked rows."""
+    import botocore.exceptions
     from sqlmodel import select
 
     from backend.app import storage
@@ -430,7 +431,7 @@ def delete_folder(folder_id: str, db=Depends(_db_session)) -> None:
         for artifact in artifacts:
             try:
                 storage.delete_object(artifact.object_key)
-            except Exception as exc:
+            except (RuntimeError, OSError, botocore.exceptions.BotoCoreError) as exc:
                 logger.warning(
                     "Failed to delete storage object %s while deleting folder %s: %s",
                     artifact.object_key,

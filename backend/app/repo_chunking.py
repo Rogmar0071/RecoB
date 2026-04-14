@@ -220,7 +220,7 @@ def merge_chunks(upload_id: str, max_bytes: int) -> tuple[dict[str, Any], str]:
     except HTTPException:
         destination.unlink(missing_ok=True)
         raise
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         destination.unlink(missing_ok=True)
         detail = f"Failed to assemble repo ZIP chunks ({type(exc).__name__})"
         if current_chunk_path is not None:
