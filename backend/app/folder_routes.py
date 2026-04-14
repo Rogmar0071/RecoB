@@ -1384,16 +1384,16 @@ def rename_artifact(
     if artifact is None or artifact.folder_id != fid:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
-    raw_name = str((body or {}).get("display_name", "")).strip()
-    if not raw_name:
+    new_display_name = str((body or {}).get("display_name", "")).strip()
+    if not new_display_name:
         raise HTTPException(status_code=422, detail="display_name must not be blank or whitespace")
-    if len(raw_name) > _ARTIFACT_DISPLAY_NAME_MAX_LEN:
+    if len(new_display_name) > _ARTIFACT_DISPLAY_NAME_MAX_LEN:
         raise HTTPException(
             status_code=422,
             detail=f"display_name must not exceed {_ARTIFACT_DISPLAY_NAME_MAX_LEN} characters",
         )
 
-    artifact.display_name = raw_name
+    artifact.display_name = new_display_name
     db.add(artifact)
     db.commit()
     db.refresh(artifact)
@@ -1405,7 +1405,7 @@ def rename_artifact(
         message=f"Artifact renamed: {artifact.id}",
         folder_id=str(fid),
         artifact_id=str(artifact.id),
-        details_json={"display_name": raw_name, "type": artifact.type},
+        details_json={"display_name": new_display_name, "type": artifact.type},
     )
     return JSONResponse(content=_artifact_dict(artifact))
 
