@@ -467,3 +467,161 @@ mutation_simulation_v2:
     - reduced_hallucination_in_execution
     - deterministic_deployment_pipeline
     - full_auditability
+
+# ===========================================================================
+# MODE_ENGINE_REPLAY_RECOVERY_V1
+# ===========================================================================
+
+replay_recovery_v1:
+  id: MODE_ENGINE_REPLAY_RECOVERY_V1
+  class: GOVERNANCE
+  reversibility: PARTIAL
+  execution_scope: BOTH
+  mutation_permission: MUTATION_ALLOWED
+
+  dependencies:
+    requires:
+      - MODE_ENGINE_MUTATION_SIMULATION_V2
+
+  system_extension:
+    description: >
+      Adds replay, rollback, and recovery intelligence on top of the mutation
+      pipeline to enable self-stabilization after failures.
+
+  extended_flow:
+    - user_intent
+    - mode_engine
+    - ai_proposal
+    - mutation_contract
+    - simulation_layer
+    - enforcement_layer
+    - validation_layer
+    - git_commit
+    - deployment_trigger
+    - runtime_monitoring
+    - failure_detection
+    - replay_and_recovery
+
+  replay_layer:
+    description: >
+      Records and replays mutation sequences for analysis and recovery.
+    required: true
+    replay_record:
+      fields:
+        - mutation_id
+        - commit_id
+        - affected_files
+        - simulation_results
+        - validation_results
+        - timestamp
+    capabilities:
+      - replay_mutation_sequence
+      - reconstruct_system_state
+      - compare_pre_post_states
+
+  rollback_layer:
+    description: >
+      Enables deterministic rollback to last known stable state.
+    rollback_strategy:
+      type: git_based
+    rollback_actions:
+      - identify_last_stable_commit
+      - execute_git_reset
+      - force_push_if_required
+    block_if:
+      - no_stable_checkpoint_found
+
+  stability_checkpointing:
+    description: >
+      Defines when a system state is considered stable.
+    criteria:
+      - successful_build
+      - successful_deployment
+      - no_runtime_errors_detected_within_window
+    checkpoint_window: short_interval
+
+  failure_detection:
+    description: >
+      Detects system instability post-deployment.
+    triggers:
+      - build_failure
+      - runtime_error
+      - healthcheck_failure
+      - unexpected_behavior_signal
+    sources:
+      - logs
+      - monitoring_hooks
+      - user_feedback_flags
+
+  recovery_layer:
+    description: >
+      Automates recovery actions after failure detection.
+    recovery_actions:
+      - rollback_to_last_stable
+      - trigger_replay_analysis
+      - generate_failure_report
+    recovery_constraints:
+      - must_log_all_actions
+      - must_preserve_failure_context
+
+  replay_analysis:
+    description: >
+      Analyzes failed mutations to identify root causes.
+    required_outputs:
+      - failure_root_cause
+      - mutation_diff_analysis
+      - incorrect_assumptions
+      - missed_dependencies
+    usage:
+      - feed_back_into_future_simulation
+      - improve_failure_prediction_accuracy
+
+  adaptive_learning:
+    description: >
+      Improves system behavior based on replay outcomes.
+    updates:
+      - simulation_risk_model
+      - dependency_mapping_accuracy
+      - validation_rules_refinement
+    constraints:
+      - no_direct_model_mutation
+      - updates_must_be_logged_and_reviewable
+
+  audit_layer_extension:
+    logging:
+      - replay_records
+      - rollback_actions
+      - recovery_events
+      - failure_analysis
+    traceability:
+      full_lifecycle_tracking: true
+
+  execution_flow_extension:
+    - monitor_runtime
+    - detect_failure
+    - if_failure_detected:
+        - initiate_recovery
+        - rollback_if_required
+        - run_replay_analysis
+        - update_learning_models
+
+  failure_modes:
+    prohibited:
+      - silent_failure
+      - rollback_without_logging
+      - recovery_without_analysis
+      - loss_of_mutation_history
+
+  governance_invariants:
+    - every_mutation_is_recorded
+    - every_failure_triggers_recovery
+    - rollback_must_restore_last_stable_state
+    - replay_must_enable_root_cause_analysis
+    - system_must_improve_after_failure
+
+  outcome_guarantees:
+    - automatic_failure_recovery
+    - deterministic_rollback
+    - full_mutation_traceability
+    - continuous_system_improvement
+    - self_stabilizing_behavior
