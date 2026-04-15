@@ -1,0 +1,469 @@
+# MODE ENGINE GOVERNANCE CONTRACT
+# ---------------------------------
+# Merged contract:
+#   MODE_ENGINE_EXECUTION_V1
+#   MODE_ENGINE_ENFORCEMENT_PATCH_V1
+#   MODE_ENGINE_MUTATION_SIMULATION_V2
+#
+# This file is READ-ONLY at runtime. The system never writes to it.
+# It defines the authoritative rules for all mode-engine-governed AI interactions.
+
+contract_id: MODE_ENGINE_EXECUTION_V1
+patch_id: MODE_ENGINE_ENFORCEMENT_PATCH_V1
+mutation_contract_id: MODE_ENGINE_MUTATION_SIMULATION_V2
+patch_type: AUGMENTATION
+mutation_class: GOVERNANCE
+mutation_reversibility: FORWARD_ONLY
+version: "2.0"
+
+# ---------------------------------------------------------------------------
+# Modes
+# ---------------------------------------------------------------------------
+
+modes:
+  strict_mode:
+    priority: 1
+    behavior_rules:
+      - no_guessing
+      - no_inference_without_data
+      - must_declare_insufficient_data
+    output_requirements:
+      - explicit_data_status
+      - missing_data_list
+    constraints:
+      - prohibit_assumptions_without_flagging
+    enforcement_upgrade:
+      required_behaviors:
+        - detect_missing_required_data
+        - enforce_insufficient_data_response
+        - prohibit_unflagged_assumptions
+      failure_action:
+        - reject_response
+        - trigger_retry
+
+  prediction_mode:
+    priority: 2
+    behavior_rules:
+      - must_surface_assumptions
+      - must_provide_multiple_possibilities
+      - must_assign_confidence_score
+      - must_identify_missing_data
+    output_requirements:
+      - assumptions
+      - alternatives
+      - confidence
+      - missing_data
+    constraints:
+      - no_single_path_answers
+
+  debug_mode:
+    priority: 3
+    behavior_rules:
+      - step_by_step_reasoning
+      - identify_failure_points
+      - map_causal_chain
+    output_requirements:
+      - root_cause
+      - reasoning_steps
+      - failure_paths
+    constraints:
+      - no_surface_level_answers
+
+  audit_mode:
+    priority: 4
+    behavior_rules:
+      - identify_risks
+      - detect_inconsistencies
+      - highlight_assumptions
+    output_requirements:
+      - risks
+      - inconsistencies
+      - assumptions
+    constraints:
+      - no_unverified_acceptance
+
+  builder_mode:
+    priority: 5
+    behavior_rules:
+      - enforce_modular_design
+      - enforce_clear_structure
+      - avoid_ambiguity
+    output_requirements:
+      - system_structure
+      - components
+      - relationships
+    constraints:
+      - no_unstructured_output
+
+# ---------------------------------------------------------------------------
+# Enforcement Patch — Pre-Generation Constraints
+# ---------------------------------------------------------------------------
+
+pre_generation_constraints:
+  description: >
+    Mode rules must be injected BEFORE AI generation to constrain behavior
+    at the source, not only validated after output.
+  required: true
+  actions:
+    - transform_user_input_with_mode_rules
+    - inject_system_prompt_constraints
+    - enforce_behavior_rules_pre_generation
+  violation:
+    - block_ai_call
+
+# ---------------------------------------------------------------------------
+# Retry Contract
+# ---------------------------------------------------------------------------
+
+retry_contract:
+  description: >
+    Defines deterministic retry behavior on validation failure.
+  max_retries: 2
+  on_failure:
+    - re_prompt_with_validation_feedback
+  on_exhaustion:
+    - return_structured_failure
+  structured_failure_format:
+    fields:
+      - error: VALIDATION_FAILED
+      - failed_rules
+      - missing_fields
+      - suggested_fix
+
+# ---------------------------------------------------------------------------
+# Mode Priority (conflict resolution)
+# ---------------------------------------------------------------------------
+
+mode_priority:
+  description: >
+    Resolves conflicts in mode stacking.
+  priority_order:
+    - strict_mode
+    - prediction_mode
+    - debug_mode
+    - audit_mode
+    - builder_mode
+  resolution_rules:
+    - highest_priority_constraints_override_lower
+    - conflicting_rules_must_resolve_to_stricter_behavior
+  example:
+    strict_vs_prediction:
+      result:
+        - allow_assumptions_only_if_flagged
+        - enforce_insufficient_data_when_required
+
+# ---------------------------------------------------------------------------
+# Hard Validation Boundary
+# ---------------------------------------------------------------------------
+
+hard_validation_boundary:
+  description: >
+    No AI response may exit the system without passing validation.
+  enforcement:
+    - all_responses_route_through_mode_engine
+    - block_response_if_validation_fails
+  invariant: true
+
+# ---------------------------------------------------------------------------
+# Audit Layer
+# ---------------------------------------------------------------------------
+
+audit_layer:
+  description: >
+    Full traceability of AI interaction and validation lifecycle.
+  logging_required: true
+  log_fields:
+    - user_intent
+    - selected_modes
+    - raw_ai_response
+    - transformed_prompt
+    - validation_results
+    - retry_count
+    - final_output
+  storage:
+    - persistent_log_store
+
+# ---------------------------------------------------------------------------
+# Validation Pipeline
+# ---------------------------------------------------------------------------
+
+validation_pipeline:
+  stage_0_pre_generation:
+    description: >
+      Validate input completeness before sending to AI.
+    checks:
+      - required_context_present
+      - input_not_empty
+    on_failure:
+      - return_insufficient_data
+
+  stage_1_structural:
+    enforce: required_fields_present
+
+  stage_2_logical:
+    enforce:
+      - assumptions_declared_if_present
+      - alternatives_present_if_required
+      - confidence_provided_if_required
+
+  stage_3_compliance:
+    enforce:
+      - mode_rules_followed
+      - constraints_not_violated
+
+  stage_4_post_retry_check:
+    description: >
+      Final guard after retries.
+    enforce:
+      - structured_failure_if_unresolved
+
+# ---------------------------------------------------------------------------
+# Response Contract
+# ---------------------------------------------------------------------------
+
+response_contract_enforcement:
+  description: >
+    All outputs must conform to mode-defined schemas.
+  rules:
+    - no_free_text_in_structured_modes
+    - enforce_required_fields_by_mode
+    - reject_partial_responses
+
+# ---------------------------------------------------------------------------
+# System Invariants
+# ---------------------------------------------------------------------------
+
+system_invariants:
+  - ai_output_is_non_authoritative
+  - mode_engine_is_mandatory_for_all_calls
+  - validation_precedes_any_output
+  - retry_logic_is_deterministic
+  - all_failures_are_explicitly_returned
+
+# ---------------------------------------------------------------------------
+# Failure Modes
+# ---------------------------------------------------------------------------
+
+failure_modes:
+  block_conditions:
+    - ai_response_without_required_fields
+    - unvalidated_response_exit
+    - mode_conflict_unresolved
+    - retry_limit_exceeded_without_failure_output
+    - missing_audit_log_entry
+
+# ---------------------------------------------------------------------------
+# Outcome Guarantees
+# ---------------------------------------------------------------------------
+
+outcome_guarantees:
+  - deterministic_response_enforcement
+  - elimination_of_silent_failures
+  - full_traceability
+  - controlled_ai_behavior
+  - consistent_mode_compliance
+
+# ===========================================================================
+# MODE_ENGINE_MUTATION_SIMULATION_V2
+# ===========================================================================
+
+mutation_simulation_v2:
+  id: MODE_ENGINE_MUTATION_SIMULATION_V2
+  class: GOVERNANCE
+  reversibility: FORWARD_ONLY
+  execution_scope: BOTH
+  mutation_permission: MUTATION_ALLOWED
+
+  dependencies:
+    requires:
+      - MODE_ENGINE_EXECUTION_V1
+      - MODE_ENGINE_ENFORCEMENT_PATCH_V1
+
+  system_flow:
+    - user_intent
+    - mode_engine
+    - apply_mode_engine_constraints
+    - ai_proposal
+    - mutation_contract
+    - simulation_layer
+    - enforcement_layer
+    - validation_layer
+    - git_commit
+    - deployment_trigger
+
+  mandatory_mode_stack:
+    enforced_for_mutations:
+      - strict_mode
+      - prediction_mode
+      - builder_mode
+
+  mode_engine_enforcement:
+    required: true
+    block_if:
+      - mode_engine_not_applied
+      - response_not_validated_by_mode_engine
+
+  mutation_contract:
+    description: >
+      AI must return a structured mutation proposal. No free-form responses allowed.
+    required_fields:
+      - target_files
+      - operation_type
+      - proposed_changes
+      - assumptions
+      - alternatives
+      - confidence
+      - risks
+      - missing_data
+    constraints:
+      - no_empty_fields
+      - no_undeclared_assumptions
+      - no_single_solution_bias
+
+  simulation_layer:
+    description: >
+      Pre-execution simulation to predict impact, detect failures,
+      and validate dependency integrity before build.
+    required: true
+    simulation_steps:
+      - dependency_surface_mapping
+      - impact_analysis
+      - failure_prediction
+      - alternative_path_evaluation
+    outputs_required:
+      - impacted_files
+      - risk_level
+      - predicted_failures
+      - safe_to_execute
+    risk_levels:
+      - low
+      - medium
+      - high
+
+  dependency_enforcement:
+    block_if:
+      - impacted_files_unaccounted_for
+      - cross_module_dependency_break_detected
+
+  enforcement_layer:
+    description: >
+      Hard execution boundary enforcing simulation and risk outcomes.
+    simulation_enforcement:
+      block_execution_if:
+        - safe_to_execute == false
+      require_explicit_override_if:
+        - risk_level == high
+
+  override_protocol:
+    required_fields:
+      - justification
+      - acknowledged_risks
+      - override_scope
+    block_if:
+      - override_missing_required_fields
+
+  validation_layer:
+    stage_0_pre_generation:
+      checks:
+        - input_not_empty
+        - required_context_present
+    stage_1_structural:
+      checks:
+        - mutation_contract_complete
+        - required_fields_present
+    stage_2_logical:
+      checks:
+        - assumptions_declared
+        - alternatives_exist
+        - confidence_present
+    stage_3_simulation:
+      checks:
+        - simulation_completed
+        - safe_to_execute == true
+    stage_4_system:
+      checks:
+        - files_exist_or_valid_for_creation
+        - paths_within_allowed_scope
+        - no_protected_files_modified
+    stage_5_build:
+      checks:
+        - build_successful
+      on_failure:
+        - abort_mutation
+        - revert_changes
+    failure_handling:
+      max_retries: 2
+      on_failure:
+        - re_prompt_ai_with:
+            - validation_feedback
+            - simulation_feedback
+      on_exhaustion:
+        - return_structured_failure
+
+  file_scope_control:
+    allowed_paths:
+      - apps/
+      - core/
+      - scripts/
+    restricted_paths:
+      - .env
+      - secrets/
+      - infra/credentials/
+
+  git_integration:
+    provider: github
+    repo_role: source_of_truth
+    commit_rules:
+      - require_validated_mutation
+      - require_simulation_pass
+      - require_mode_engine_validation
+    push_rules:
+      - block_on_validation_failure
+      - block_on_simulation_failure
+      - block_on_build_failure
+      - block_on_enforcement_failure
+
+  deployment:
+    provider: render
+    trigger:
+      - git_push
+    constraint:
+      - only_validated_simulated_enforced_commits_trigger_deploy
+
+  audit_layer:
+    logging:
+      - user_intent
+      - selected_modes
+      - mutation_contract
+      - simulation_results
+      - validation_results
+      - enforcement_results
+      - build_status
+      - commit_id
+    traceability:
+      enabled: true
+
+  failure_modes:
+    prohibited:
+      - direct_ai_commit
+      - unvalidated_mutation_execution
+      - unsimulated_execution
+      - unenforced_simulation_results
+      - hidden_assumptions
+      - unrestricted_file_access
+
+  governance_invariants:
+    - ai_is_proposal_only
+    - mode_engine_is_mandatory
+    - simulation_precedes_execution
+    - enforcement_precedes_execution
+    - validation_precedes_deployment
+    - deployment_requires_valid_commit
+
+  outcome_guarantees:
+    - controlled_code_mutation
+    - pre_execution_failure_detection
+    - enforced_execution_safety
+    - reduced_hallucination_in_execution
+    - deterministic_deployment_pipeline
+    - full_auditability
