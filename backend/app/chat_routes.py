@@ -270,8 +270,10 @@ CONSTRAINTS
 
 VALIDATION RULES
 - structural_validation: all required fields must be present and the output must be a JSON object.
-- logical_validation: prediction_mode requires at least two alternatives; debug_mode requires non-empty reasoning_steps.
-- compliance_validation: if missing_data_list is non-empty, explicit_data_status must be "insufficient_data" or "partial_data".
+- logical_validation: prediction_mode requires at least two alternatives;
+  debug_mode requires non-empty reasoning_steps.
+- compliance_validation: if missing_data_list is non-empty,
+  explicit_data_status must be "insufficient_data" or "partial_data".
 - If data is missing, clearly say so instead of guessing.
 """
 
@@ -817,7 +819,8 @@ def _mode_engine_validation_errors(
         explicit_data_status = str(payload.get("explicit_data_status", "")).strip().lower()
         if missing_data_list and explicit_data_status not in {"insufficient_data", "partial_data"}:
             errors.append(
-                'explicit_data_status must be "insufficient_data" or "partial_data" when missing_data_list is non-empty'
+                'explicit_data_status must be "insufficient_data" or "partial_data" '
+                "when missing_data_list is non-empty"
             )
 
     if "prediction_mode" in selected_modes:
@@ -912,7 +915,9 @@ def _build_mode_engine_fallback(
             {
                 "risks": ["Proceeding without verified data could produce incorrect conclusions."],
                 "inconsistencies": [],
-                "assumptions": ["The available data is incomplete and cannot be trusted for a final answer."],
+                "assumptions": [
+                    "The available data is incomplete and cannot be trusted for a final answer."
+                ],
             }
         )
     return fallback
